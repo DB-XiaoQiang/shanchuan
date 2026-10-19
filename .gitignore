@@ -1,0 +1,8 @@
+.build/
+dist/
+evidence/
+.DS_Store
+
+# Local acceptance notes contain internal hosts, paths and screenshots.
+ACCEPTANCE-*.md
+VALIDATION.md
