@@ -75,6 +75,19 @@ import OSLog
         case notCopy, notDispatched, cancelled, inputChanged, expired, unchanged, ready
     }
 
+    struct ReleaseTracker {
+        private var targets: [UInt32: pid_t] = [:]
+
+        mutating func press(id: UInt32, target: pid_t?) -> Bool {
+            guard targets[id] == nil, let target else { return false }
+            targets[id] = target
+            return true
+        }
+
+        mutating func release(id: UInt32) -> pid_t? { targets.removeValue(forKey: id) }
+        mutating func reset() { targets.removeAll() }
+    }
+
     private struct CopyDispatchBaseline {
         let changeCount: Int
         let inputCounters: [UInt32]
@@ -89,7 +102,7 @@ import OSLog
     private var localMonitor: Any?
     private var registrations: [Binding: Registration] = [:]
     private var actions: [UInt32: Action] = [:]
-    private var pressed: Set<UInt32> = []
+    private var releases = ReleaseTracker()
     private var nextID: UInt32 = 1
     private var configuration: CopyPasteShortcuts?
     private var recordingShortcut = false
@@ -236,10 +249,9 @@ import OSLog
     private func receiveHotKey(id: UInt32, released: Bool) -> OSStatus {
         guard actions[id] != nil, !recordingShortcut else { return OSStatus(eventNotHandledErr) }
         if released {
-            pressed.remove(id)
-        } else if pressed.insert(id).inserted, let action = actions[id] {
+            finishHotKey(id: id)
+        } else if releases.press(id: id, target: NSWorkspace.shared.frontmostApplication?.processIdentifier), let action = actions[id] {
             logger.info("Carbon hotkey received: id=\(id, privacy: .public) action=\(action.rawValue, privacy: .public)")
-            perform(action)
         }
         return noErr
     }
@@ -249,17 +261,28 @@ import OSLog
               event.cgEvent?.getIntegerValueField(.eventSourceUserData) != Self.syntheticEventMarker else { return event }
         if event.type == .keyUp {
             for (binding, registration) in registrations where binding.keyCode == UInt32(event.keyCode) {
-                pressed.remove(registration.id)
+                finishHotKey(id: registration.id)
             }
             return event
         }
         guard let pair = registrations.first(where: { $0.key.matches(event) }),
               let action = actions[pair.value.id] else { return event }
-        if !event.isARepeat, pressed.insert(pair.value.id).inserted {
+        if !event.isARepeat, releases.press(id: pair.value.id, target: NSWorkspace.shared.frontmostApplication?.processIdentifier) {
             logger.info("Local hotkey received: id=\(pair.value.id, privacy: .public) action=\(action.rawValue, privacy: .public)")
-            perform(action)
         }
         return nil
+    }
+
+    /// A shortcut is committed on release, once. Its own held-key repeats must not be
+    /// mistaken for a later user command; never redirect it to a different application.
+    private func finishHotKey(id: UInt32) {
+        guard let originalPID = releases.release(id: id) else { return }
+        guard let action = actions[id] else { return }
+        guard NSWorkspace.shared.frontmostApplication?.processIdentifier == originalPID else {
+            reportNotPerformed("快捷键已取消：按键期间前台应用已切换", action: action, target: nil)
+            return
+        }
+        perform(action)
     }
 
     private func perform(_ action: Action) {
@@ -329,6 +352,9 @@ import OSLog
                 return
             }
             guard Self.newInputCounters() == requestInputCounters else {
+                let observedCounters = Self.newInputCounters().description
+                let initialCounters = requestInputCounters.description
+                self.logger.notice("Shortcut input counters changed: initial=\(initialCounters, privacy: .public) observed=\(observedCounters, privacy: .public)")
                 self.logger.notice("Shortcut cancelled: new physical operation while waiting for modifier release")
                 self.reportNotPerformed("等待快捷键释放期间检测到新的操作", action: action, target: target)
                 return
@@ -408,15 +434,26 @@ import OSLog
                 self.reportNotPerformed("发送按键前检测到新的操作", action: action, target: target)
                 return
             }
+            let keyboardCopyBaseline = action == .copy ? Self.captureCopyDispatchBaseline() : nil
+            guard (keyboardCopyBaseline?.inputCounters ?? Self.newInputCounters()) == requestInputCounters else {
+                self.reportNotPerformed("发送按键前检测到新的操作", action: action, target: target)
+                return
+            }
             for event in events { event.postToPid(pid) }
             self.logger.info("Posted four command events: action=\(action.rawValue, privacy: .public) bundleID=\(bundleID, privacy: .public) pid=\(pid, privacy: .public) source=combinedSession route=postToPid")
-            // Posting has no receiver acknowledgment: avoid claiming that the target copied/pasted successfully.
+            // Posting alone is insufficient: require a fresh clipboard update in the same
+            // bounded window with no intervening physical input or application switch.
             if action == .copy {
-                self.report("已发送复制按键，结果无法确认，未发送内网", target: target)
+                await self.confirmCopyReady(baseline: keyboardCopyBaseline, target: target, commandID: commandID)
             } else {
                 self.report("已发送\(action.rawValue)按键", target: target)
             }
         }
+    }
+
+    static func prefersKeyboardDispatch(bundleID: String?) -> Bool {
+        guard let bundleID else { return false }
+        return bundleID == "com.jetbrains.intellij" || bundleID.hasPrefix("com.jetbrains.intellij.")
     }
 
     /// Selects by declared standard Command+C/V metadata, never by localized menu titles.
@@ -455,6 +492,12 @@ import OSLog
                                     willDispatch: () -> Bool,
                                     mayDispatch: () -> Bool) -> MenuDispatchResult {
         let pid = target.processIdentifier
+        // IDEA's Java accessibility menu lookup can fail before any AX action runs.
+        // Use its normal editor shortcut without traversing that menu.
+        if Self.prefersKeyboardDispatch(bundleID: target.bundleIdentifier) {
+            logger.info("IDEA compatibility: bypass AX menu lookup; use protected keyboard copy; pid=\(pid, privacy: .public)")
+            return .definitelyNotPerformed
+        }
         let application = AXUIElementCreateApplication(pid)
         // Bound each IPC call and the scan; a stalled application must not freeze the shortcut service.
         AXUIElementSetMessagingTimeout(application, 0.15)
@@ -463,7 +506,7 @@ import OSLog
         guard menuStatus == .success, let menuBarValue,
               CFGetTypeID(menuBarValue) == AXUIElementGetTypeID() else {
             self.logger.notice("AX menu unavailable: status=\(menuStatus.rawValue, privacy: .public) pid=\(pid, privacy: .public)")
-            return [AXError.attributeUnsupported, .noValue, .notImplemented].contains(menuStatus) ? .definitelyNotPerformed : .uncertain
+            return .definitelyNotPerformed // No AX action has been attempted.
         }
         let menuBar = menuBarValue as! AXUIElement
         let deadline = Date().addingTimeInterval(1.0)
@@ -521,9 +564,10 @@ import OSLog
                 pending.append(contentsOf: children.map { ($0, depth + 1) })
             }
         }
-        guard complete, Date() < deadline, mayDispatch() else {
-            logger.notice("AX menu scan cancelled or incomplete; no keyboard retry; pid=\(pid, privacy: .public)")
-            return .uncertain
+        guard mayDispatch() else { return .uncertain }
+        guard complete, Date() < deadline else {
+            logger.notice("AX read-only menu scan incomplete; keyboard fallback permitted; pid=\(pid, privacy: .public)")
+            return .definitelyNotPerformed
         }
         switch Self.selectMenuItem(keyCode: action.commandKeyCode, items: metadata) {
         case .noMatch, .unsupported:
@@ -588,8 +632,8 @@ import OSLog
         return CopyDispatchBaseline(changeCount: NSPasteboard.general.changeCount, inputCounters: counters)
     }
 
-    /// Only acknowledged local/AX copies get this bounded window for asynchronous clipboard writes.
-    /// Any new physical operation closes the window; an unacknowledged keyboard fallback never enters it.
+    /// A dispatched copy gets a bounded window for asynchronous clipboard writes.
+    /// Any new physical operation or target change closes the window; posting alone never sends.
     private func confirmCopyReady(baseline: CopyDispatchBaseline?, target: NSRunningApplication, commandID: UUID) async {
         let deadline = ContinuousClock.now.advanced(by: .seconds(1))
         while ContinuousClock.now < deadline {
@@ -611,7 +655,7 @@ import OSLog
                     reportNotPerformed("复制确认已取消", action: .copy, target: target)
                     return
                 }
-                logger.info("Acknowledged copy confirmed within protected input window; notifying send flow once; pid=\(target.processIdentifier, privacy: .public)")
+                logger.info("Copy clipboard update confirmed within protected input window; notifying send flow once; pid=\(target.processIdentifier, privacy: .public)")
                 onCopyReady(observedCount)
                 report("已确认复制，已交给发送流程", target: target)
                 return
@@ -637,7 +681,7 @@ import OSLog
                 return
             }
         }
-        logger.notice("Acknowledged copy produced no confirmed update within protected one-second window; no send")
+        logger.notice("Dispatched copy produced no confirmed update within protected one-second window; no send")
         report("剪贴板未更新，未发送", target: target)
     }
 
@@ -655,7 +699,7 @@ import OSLog
         pendingCommand?.cancel()
         pendingCommand = nil
         pendingCommandID = nil
-        pressed.removeAll()
+        releases.reset()
     }
 
     private func releaseRegistrations() {
