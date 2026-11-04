@@ -14,8 +14,11 @@ public struct PreparedTransfer: Sendable {
     public let files: [PreparedUpload]
     /// Includes a private temporary directory; remove these URLs after success or failure.
     public let temporaryFiles: [URL]
-    public init(files: [PreparedUpload], temporaryFiles: [URL]) {
-        self.files = files; self.temporaryFiles = temporaryFiles
+    public let excludedItemCount: Int
+    public let groupedFileFolders: [String]
+    public init(files: [PreparedUpload], temporaryFiles: [URL], excludedItemCount: Int = 0, groupedFileFolders: [String] = []) {
+        self.files = files; self.temporaryFiles = temporaryFiles; self.excludedItemCount = excludedItemCount
+        self.groupedFileFolders = groupedFileFolders
     }
 }
 
@@ -43,7 +46,7 @@ public enum TransferProtocol {
         try validateDirectory(preferences.directory)
         let systemDir = trimSlash(preferences.directory) + "/system_temp"
         let controlName = preferences.textRemoteName + "." + String(timestamp)
-        var specs: [(url: URL, name: String, directory: String, folder: Bool, marked: Bool)] = []
+        var specs: [(url: URL, name: String, directory: String, folder: Bool, marked: Bool, members: [URL])] = []
         var entities = Set<String>()
         if entry.kind != .text {
             guard !entry.paths.isEmpty else { throw TransferProtocolError.emptyFiles }
@@ -68,23 +71,69 @@ public enum TransferProtocol {
                     directory = trimSlash(preferences.decryptPrefix) + (tail.map { "/" + $0 } ?? "")
                 } else { directory = systemDir }
                 let key = directory + "/" + remote
-                guard entities.insert(key).inserted, key != systemDir + "/" + controlName else { throw TransferProtocolError.duplicateEntity(remote) }
-                specs.append((url, name, directory, folder, marked))
+                guard key != systemDir + "/" + controlName else { throw TransferProtocolError.duplicateEntity(remote) }
+                entities.insert(key)
+                specs.append((url, name, directory, folder, marked, []))
             }
         }
+        // The receiver locates ordinary payloads by their stem. Preserve that wire
+        // contract and use its existing folder protocol for colliding formats.
+        let groups = Dictionary(grouping: specs.indices) { index in
+            let spec = specs[index]
+            let remote = spec.folder || office.contains(spec.url.pathExtension.lowercased())
+                ? spec.name : spec.url.deletingPathExtension().lastPathComponent
+            return spec.directory + "/" + remote
+        }
+        var handled = Set<Int>()
+        var resolved = specs
+        resolved.removeAll()
+        for index in specs.indices {
+            guard !handled.contains(index) else { continue }
+            let spec = specs[index]
+            let remote = spec.folder || office.contains(spec.url.pathExtension.lowercased())
+                ? spec.name : spec.url.deletingPathExtension().lastPathComponent
+            let indices = groups[spec.directory + "/" + remote]!
+            handled.formUnion(indices)
+            guard indices.count > 1 else { resolved.append(spec); continue }
+            let members = indices.map { specs[$0] }
+            // Identical full names cannot share a folder; marked Office files must
+            // retain their decrypt route. Neither case is silently renamed.
+            guard members.allSatisfy({ !$0.folder && !$0.marked && !office.contains($0.url.pathExtension.lowercased()) }),
+                  Set(members.map(\.name)).count == members.count else {
+                throw TransferProtocolError.duplicateEntity(remote)
+            }
+            var groupName: String
+            repeat {
+                groupName = "闪传多格式-\(timestamp)-\(UUID().uuidString.prefix(8))"
+            } while !entities.insert(systemDir + "/" + groupName).inserted
+            resolved.append((spec.url, groupName, systemDir, true, false, members.map(\.url)))
+        }
+        specs = resolved
         let root = fm.temporaryDirectory.appendingPathComponent("copytool-protocol-" + UUID().uuidString, isDirectory: true)
         try fm.createDirectory(at: root, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
         do {
             let control = root.appendingPathComponent("control")
             var uploads: [PreparedUpload] = []
             var manifest: [String] = []
+            var excludedItemCount = 0
             for (index, spec) in specs.enumerated() {
                 try transfer.checkCancellation()
                 let payload: URL
                 let remote: String
                 if spec.folder {
                     payload = root.appendingPathComponent("archive-\(index)")
-                    try transfer.zip(directory: spec.url, destination: payload)
+                    if spec.members.isEmpty {
+                        excludedItemCount += try transfer.zip(directory: spec.url, destination: payload, exclusionRules: preferences.directoryExclusionRules)
+                    } else {
+                        let group = root.appendingPathComponent("group-\(index)", isDirectory: true)
+                        try fm.createDirectory(at: group, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
+                        for member in spec.members {
+                            try transfer.checkCancellation()
+                            try fm.copyItem(at: member, to: group.appendingPathComponent(member.lastPathComponent))
+                        }
+                        // These were explicitly selected files, so directory exclusions do not apply.
+                        try transfer.zip(directory: group, destination: payload)
+                    }
                     remote = spec.name
                 } else {
                     payload = root.appendingPathComponent("payload-\(index)")
@@ -102,7 +151,8 @@ public enum TransferProtocol {
             try Data(content.utf8).write(to: control, options: .atomic)
             try fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: control.path)
             uploads.append(PreparedUpload(file: control, remoteName: controlName, directory: systemDir))
-            return PreparedTransfer(files: uploads, temporaryFiles: [root])
+            return PreparedTransfer(files: uploads, temporaryFiles: [root], excludedItemCount: excludedItemCount,
+                                    groupedFileFolders: specs.filter { !$0.members.isEmpty }.map(\.name))
         } catch {
             try? fm.removeItem(at: root)
             throw error

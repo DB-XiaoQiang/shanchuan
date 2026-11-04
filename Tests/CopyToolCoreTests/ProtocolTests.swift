@@ -84,7 +84,53 @@ final class ProtocolTests: XCTestCase {
             let file = try source(name, "abc")
             XCTAssertThrowsError(try TransferProtocol.prepare(entry: HistoryEntry(kind: .file, content: "", paths: [file.path]), preferences: prefs, timestamp: 7))
         }
-        let a = try source("same.txt", "a"), b = try source("same.bin", "b")
+        let a = try source("same.txt", "a")
+        let folder = root.appendingPathComponent("other")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let b = folder.appendingPathComponent("same.txt")
+        try Data("b".utf8).write(to: b)
         XCTAssertThrowsError(try TransferProtocol.prepare(entry: HistoryEntry(kind: .file, content: "", paths: [a.path, b.path]), preferences: prefs, timestamp: 7))
     }
+    func testSameStemFormatsUseFolderProtocolAndPreserveExactFiles() throws {
+        let pdf = try source("部署.pdf", "%PDF-synthetic")
+        let md = try source("部署.md", "# 合成部署说明\n")
+        let other = try source("notes.txt", "unchanged")
+        var p = prefs
+        p.directoryExclusionRules = "*.md\n*.pdf"
+        let plan = try TransferProtocol.prepare(entry: HistoryEntry(kind: .file, content: "", paths: [pdf.path, other.path, md.path]), preferences: p, timestamp: 8)
+        defer { cleanup(plan) }
+        XCTAssertEqual(plan.files.count, 3)
+        XCTAssertEqual(plan.groupedFileFolders, [plan.files[0].remoteName])
+        XCTAssertTrue(plan.files[0].remoteName.hasPrefix("闪传多格式-8-"))
+        XCTAssertEqual(plan.files[1].remoteName, "notes")
+        XCTAssertEqual(plan.files[2].remoteName, "copy.temp.8")
+        XCTAssertEqual(plan.excludedItemCount, 0)
+        for file in [pdf, md] {
+            let process = Process(), output = Pipe()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/unzip")
+            process.arguments = ["-p", plan.files[0].file.path, file.lastPathComponent]
+            process.standardOutput = output
+            try process.run()
+            let data = output.fileHandleForReading.readDataToEndOfFile()
+            process.waitUntilExit()
+            XCTAssertEqual(process.terminationStatus, 0)
+            XCTAssertEqual(data, try Data(contentsOf: file))
+        }
+        let manifest = try String(contentsOf: plan.files.last!.file, encoding: .utf8)
+        XCTAssertTrue(manifest.hasPrefix("file=folder:" + plan.files[0].remoteName + "|"))
+        XCTAssertTrue(manifest.contains(",notes.txt|"))
+        XCTAssertTrue(manifest.hasSuffix("\r\n8"))
+        XCTAssertEqual(try Data(contentsOf: pdf), Data("%PDF-synthetic".utf8))
+        XCTAssertEqual(try Data(contentsOf: md), Data("# 合成部署说明\n".utf8))
+    }
+
+    func testMultipleCollisionGroupsHaveDistinctRemoteNames() throws {
+        let files = try ["a.pdf", "a.md", "b.txt", "b.bin"].map { try source($0, $0) }
+        let plan = try TransferProtocol.prepare(entry: HistoryEntry(kind: .file, content: "", paths: files.map(\.path)), preferences: prefs, timestamp: 9)
+        defer { cleanup(plan) }
+        XCTAssertEqual(plan.groupedFileFolders.count, 2)
+        XCTAssertEqual(Set(plan.files.map(\.remoteName)).count, 3)
+        XCTAssertEqual(plan.files.last!.remoteName, "copy.temp.9")
+    }
+
 }

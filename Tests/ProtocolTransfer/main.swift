@@ -41,3 +41,10 @@ try Data("相对路径内容\r\n".utf8).write(to: nested.appendingPathComponent(
 try Data([0, 1, 2, 127, 128, 254, 255]).write(to: nested.appendingPathComponent("bytes.bin"))
 try send(HistoryEntry(kind: .file, content: "", paths: [file.path, folder.path]), timestamp: 1729000000002)
 print("FILE_AND_FOLDER_PLAN_UPLOADED")
+
+let pdf = root.appendingPathComponent("部署.pdf")
+let markdown = root.appendingPathComponent("部署.md")
+try Data("%PDF synthetic format".utf8).write(to: pdf)
+try Data("# 合成部署说明\n".utf8).write(to: markdown)
+try send(HistoryEntry(kind: .file, content: "", paths: [pdf.path, markdown.path]), timestamp: 1729000000003)
+print("SAME_STEM_FORMATS_PLAN_UPLOADED")

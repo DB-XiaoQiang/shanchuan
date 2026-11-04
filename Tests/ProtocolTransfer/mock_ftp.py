@@ -100,7 +100,7 @@ with LoopbackServer(("127.0.0.1", 0), FTP) as server, tempfile.TemporaryDirector
     thread.start()
     root = pathlib.Path(__file__).resolve().parents[2]
     executable = str(pathlib.Path(temp) / "protocol-transfer-test")
-    sources = [root / "Sources/CopyToolCore" / name for name in ("KeyboardShortcutConfiguration.swift", "History.swift", "FTPTransfer.swift", "TransferProtocol.swift")]
+    sources = [root / "Sources/CopyToolCore" / name for name in ("KeyboardShortcutConfiguration.swift", "History.swift", "DirectoryExclusions.swift", "FTPTransfer.swift", "TransferProtocol.swift")]
     try:
         subprocess.run(["swiftc", "-swift-version", "6", *(str(source) for source in sources), str(root / "Tests/ProtocolTransfer/main.swift"), "-o", executable], check=True, timeout=60)
         subprocess.run([executable, str(server.server_address[1])], check=True, timeout=30)
@@ -109,7 +109,7 @@ with LoopbackServer(("127.0.0.1", 0), FTP) as server, tempfile.TemporaryDirector
         thread.join(timeout=5)
 
 assert not failures, failures
-assert [(directory, name) for directory, name, _ in uploads] == [
+assert [(directory, name) for directory, name, _ in uploads[:4]] == [
     (expected_directory, "copy.temp.1729000000001"),
     (expected_directory, "普通文件"),
     (expected_directory, "测试文件夹"),
@@ -145,4 +145,17 @@ with zipfile.ZipFile(io.BytesIO(folder_payload)) as archive:
         "子目录 with spaces/bytes.bin": bytes([0, 1, 2, 127, 128, 254, 255]),
     }, f"Folder archive must restore relative paths and preserve all file bytes: {list(files)}"
 print("FILE_ENTITY_AND_FOLDER_ZIP_PASS")
+assert len(uploads) == 6
+assert uploads[4][0] == expected_directory
+assert uploads[4][1].startswith("闪传多格式-1729000000003-")
+assert uploads[5][:2] == (expected_directory, "copy.temp.1729000000003")
+with zipfile.ZipFile(io.BytesIO(uploads[4][2])) as archive:
+    assert {entry.filename: archive.read(entry) for entry in archive.infolist() if not entry.is_dir()} == {
+        "部署.pdf": b"%PDF synthetic format",
+        "部署.md": "# 合成部署说明\n".encode("utf-8"),
+    }
+name = uploads[4][1]
+digest = hashlib.md5(uploads[4][2]).hexdigest()
+assert uploads[5][2] == f"file=folder:{name}|{digest}\r\n1729000000003".encode("utf-8")
+print("SAME_STEM_FORMATS_FOLDER_AND_CONTROL_LAST_PASS")
 print("LOOPBACK_PROTOCOL_TRANSFER_PASS")

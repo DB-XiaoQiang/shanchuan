@@ -4,6 +4,25 @@ import CopyToolCore
 
 final class SettingsAutosaveTests: XCTestCase {
     @MainActor
+    func testDirectoryRulesAutosaveAndInvalidEditPreservesSavedRules() async throws {
+        let state = AutosaveState()
+        let store = makeStore(state: state)
+        store.draft.directoryExclusionRules = ".git/\nnode_modules/\n*.log"
+        store.schedule(); store.flush()
+        XCTAssertEqual(state.preferences.directoryExclusionRules, ".git/\nnode_modules/\n*.log")
+        XCTAssertEqual(store.status, .saved)
+        store.draft.directoryExclusionRules = "../outside"
+        store.schedule(); store.flush()
+        if case .failed(let message) = store.status { XCTAssertTrue(message.contains("目录排除规则")) }
+        else { XCTFail("Invalid directory rules must not be saved") }
+        XCTAssertEqual(state.preferences.directoryExclusionRules, ".git/\nnode_modules/\n*.log")
+        store.draft.directoryExclusionRules = ""
+        store.schedule(); store.flush()
+        XCTAssertEqual(state.preferences.directoryExclusionRules, "")
+        XCTAssertEqual(store.status, .saved)
+    }
+
+    @MainActor
     func testOpeningAndFlushingUnchangedSettingsDoNotWrite() async throws {
         let state = AutosaveState()
         let store = makeStore(state: state)

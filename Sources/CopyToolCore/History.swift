@@ -26,18 +26,18 @@ public struct AppPreferences: Codable, Equatable, Sendable {
     // 仅兼容旧配置；普通剪贴板变化永不据此上传。
     public var syncEnabled = false
     public var historyEnabled = true
-    public var notificationsEnabled = false
     public var showTransferProgress = true
     public var restoreOnResend = false
     public var textRemoteName = "copy.temp"
     public var autoDecrypt = true
     public var decryptPrefix = "/jiemi/"
+    public var directoryExclusionRules = ""
     public var shortcuts = CopyPasteShortcuts()
     public init() {}
     private enum CodingKeys: String, CodingKey {
         case host, port, username, directory, ttlDays, syncEnabled, historyEnabled
-        case notificationsEnabled, showTransferProgress, restoreOnResend, textRemoteName
-        case autoDecrypt, decryptPrefix, shortcuts
+        case showTransferProgress, restoreOnResend, textRemoteName
+        case autoDecrypt, decryptPrefix, shortcuts, directoryExclusionRules
     }
     public init(from decoder: Decoder) throws {
         self.init()
@@ -49,13 +49,13 @@ public struct AppPreferences: Codable, Equatable, Sendable {
         ttlDays = try values.decodeIfPresent(Int.self, forKey: .ttlDays) ?? ttlDays
         syncEnabled = try values.decodeIfPresent(Bool.self, forKey: .syncEnabled) ?? syncEnabled
         historyEnabled = try values.decodeIfPresent(Bool.self, forKey: .historyEnabled) ?? historyEnabled
-        notificationsEnabled = try values.decodeIfPresent(Bool.self, forKey: .notificationsEnabled) ?? notificationsEnabled
         showTransferProgress = try values.decodeIfPresent(Bool.self, forKey: .showTransferProgress) ?? showTransferProgress
         restoreOnResend = try values.decodeIfPresent(Bool.self, forKey: .restoreOnResend) ?? restoreOnResend
         textRemoteName = try values.decodeIfPresent(String.self, forKey: .textRemoteName) ?? textRemoteName
         autoDecrypt = try values.decodeIfPresent(Bool.self, forKey: .autoDecrypt) ?? autoDecrypt
         decryptPrefix = try values.decodeIfPresent(String.self, forKey: .decryptPrefix) ?? decryptPrefix
         shortcuts = try values.decodeIfPresent(CopyPasteShortcuts.self, forKey: .shortcuts) ?? shortcuts
+        directoryExclusionRules = try values.decodeIfPresent(String.self, forKey: .directoryExclusionRules) ?? directoryExclusionRules
     }
     public var validationError: String? {
         if host.isEmpty { return "请填写 FTP 服务器地址" }
@@ -65,6 +65,8 @@ public struct AppPreferences: Codable, Equatable, Sendable {
         if !directory.hasPrefix("/") || directory.contains("\n") || directory.contains("\r") { return "FTP 目录须以 / 开头" }
         if ttlDays < 1 || ttlDays > 3650 { return "历史保留天数须为 1–3650" }
         if textRemoteName.isEmpty || textRemoteName.contains("/") || textRemoteName.contains("\n") || textRemoteName.contains("\r") { return "文本远端文件名无效" }
+        do { _ = try DirectoryExclusions(directoryExclusionRules) }
+        catch { return error.localizedDescription }
         return shortcuts.validationError
     }
 }

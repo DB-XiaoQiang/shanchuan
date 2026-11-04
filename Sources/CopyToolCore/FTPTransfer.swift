@@ -102,11 +102,42 @@ public final class FTPTransfer: @unchecked Sendable {
     }
 
     /// Caller owns and removes destination after uploading it.
-    public func zip(directory: URL, destination: URL) throws {
-        guard (try directory.resourceValues(forKeys: [.isDirectoryKey])).isDirectory == true else { throw FTPTransferError.invalidFile }
-        try run(executable: "/usr/bin/ditto", arguments: ["-c", "-k", "--norsrc", directory.path, destination.path], stdin: Data(), progress: { _ in }, secrets: [])
-        do { try normalizeZIPEncoding(at: destination) }
-        catch { try? FileManager.default.removeItem(at: destination); throw error }
+    @discardableResult public func zip(directory: URL, destination: URL, exclusionRules: String = "") throws -> Int {
+        try checkCancellation()
+        let values = try directory.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
+        guard values.isDirectory == true, values.isSymbolicLink != true else { throw FTPTransferError.invalidFile }
+        let rules = try DirectoryExclusions(exclusionRules)
+        let fm = FileManager.default
+        var snapshot: URL?
+        defer { if let snapshot { try? fm.removeItem(at: snapshot) } }
+        var source = directory
+        var excluded = 0
+        if !rules.isEmpty {
+            let root = fm.temporaryDirectory.appendingPathComponent("copytool-filter-" + UUID().uuidString, isDirectory: true)
+            let sourcePath = directory.resolvingSymlinksInPath().standardizedFileURL.path
+            let sourcePrefix = sourcePath.hasSuffix("/") ? sourcePath : sourcePath + "/"
+            guard !root.resolvingSymlinksInPath().standardizedFileURL.path.hasPrefix(sourcePrefix),
+                  !destination.resolvingSymlinksInPath().standardizedFileURL.path.hasPrefix(sourcePrefix) else {
+                throw FTPTransferError.invalidSettings("无法在所选目录外创建临时副本，请选择更具体的目录。")
+            }
+            try fm.createDirectory(at: root, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
+            snapshot = root
+            source = root.appendingPathComponent("contents", isDirectory: true)
+            excluded = try FilteredDirectorySnapshot.copy(source: directory, destination: source, rules: rules, checkCancellation: checkCancellation)
+        }
+        do {
+            try checkCancellation()
+            if try fm.contentsOfDirectory(atPath: source.path).isEmpty {
+                // ditto rejects empty input. A zero-entry ZIP consists of its 22-byte end record.
+                try (Data([0x50, 0x4b, 0x05, 0x06]) + Data(repeating: 0, count: 18)).write(to: destination, options: .atomic)
+                try fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: destination.path)
+            } else {
+                try run(executable: "/usr/bin/ditto", arguments: ["-c", "-k", "--norsrc", source.path, destination.path], stdin: Data(), progress: { _ in }, secrets: [])
+            }
+            try normalizeZIPEncoding(at: destination)
+            try checkCancellation()
+            return excluded
+        } catch { try? fm.removeItem(at: destination); throw error }
     }
 
     /// ditto emits UTF-8 path bytes without the language-encoding bit on some macOS versions.

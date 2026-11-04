@@ -16,7 +16,6 @@ final class OriginalFTPConfigTests: XCTestCase {
         var previous = AppPreferences()
         previous.ttlDays = 31
         previous.syncEnabled = false
-        previous.notificationsEnabled = false
         previous.historyEnabled = false
         previous.restoreOnResend = true
         let config = base + """

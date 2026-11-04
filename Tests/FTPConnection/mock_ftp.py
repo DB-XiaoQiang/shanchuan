@@ -86,6 +86,7 @@ with Server(('127.0.0.1', 0), FTP) as server, tempfile.TemporaryDirectory() as t
     executable = pathlib.Path(temporary) / 'ftp-connection-test'
     subprocess.run(['swiftc', '-swift-version', '6',
                     str(root / 'Sources/CopyToolCore/FTPTransfer.swift'),
+                    str(root / 'Sources/CopyToolCore/DirectoryExclusions.swift'),
                     str(root / 'Sources/CopyToolCore/FTPConnectionTest.swift'),
                     str(root / 'Tests/FTPConnection/main.swift'), '-o', str(executable)], check=True)
     client = subprocess.Popen([str(executable), str(server.server_address[1]), str(closed_port)],
