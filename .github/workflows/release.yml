@@ -1,0 +1,144 @@
+name: 版本发布
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 已存在的版本标签（如 v0.2.0）
+        required: true
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref_name }}
+      - id: version
+        name: 校验标签和版本号
+        env:
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          python3 scripts/check-version.py "$RELEASE_TAG"
+          echo "tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+  macos:
+    needs: version
+    runs-on: macos-15
+    outputs:
+      signed: ${{ steps.signing.outputs.signed }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.version.outputs.tag }}
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: '16.4'
+      - run: swift test
+      - name: FTP 回环集成测试
+        run: |
+          python3 Tests/Transfer/mock_ftp.py
+          python3 Tests/ProtocolTransfer/mock_ftp.py
+          python3 Tests/FTPConnection/mock_ftp.py
+      - id: signing
+        name: 配置发布签名
+        env:
+          MACOS_CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: ./scripts/ci-signing.sh
+      - name: 打包
+        env:
+          SHANCHUAN_BUILD_NUMBER: ${{ github.run_number }}
+          SHANCHUAN_UPDATE_FEED: ${{ vars.MACOS_UPDATE_FEED }}
+          SPARKLE_PUBLIC_KEY: ${{ vars.SPARKLE_PUBLIC_KEY }}
+        run: ./scripts/package.sh
+      - name: 生成签名更新源（配置后启用）
+        if: vars.MACOS_UPDATE_FEED != ''
+        env:
+          SHANCHUAN_UPDATE_FEED: ${{ vars.MACOS_UPDATE_FEED }}
+          MACOS_DOWNLOAD_BASE: ${{ vars.MACOS_DOWNLOAD_BASE }}
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+          RELEASE_TAG: ${{ needs.version.outputs.tag }}
+        run: |
+          test "${{ steps.signing.outputs.signed }}" = true
+          python3 scripts/generate-appcast.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-macos
+          path: |
+            dist/*.zip
+            dist/appcast.xml
+          if-no-files-found: error
+      - name: 清理临时钥匙串
+        if: always()
+        run: |
+          if [ -f "$RUNNER_TEMP/shanchuan-signing.keychain-db" ]; then
+            security delete-keychain "$RUNNER_TEMP/shanchuan-signing.keychain-db"
+          fi
+  windows:
+    needs: version
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.version.outputs.tag }}
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - run: dotnet build windows/Shanchuan.sln -c Release
+      - name: 测试、发布和安装包
+        shell: pwsh
+        env:
+          UPDATE_REPOSITORY: ${{ vars.WINDOWS_UPDATE_REPOSITORY }}
+        run: ./windows/scripts/publish.ps1 -Runtime win-x64 -Installer -UpdateRepository "$env:UPDATE_REPOSITORY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-windows
+          path: |
+            windows/dist/Shanchuan-win-x64.zip
+            windows/dist/releases/*
+          if-no-files-found: error
+  release:
+    needs: [version, macos, windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          merge-multiple: true
+          path: release
+      - name: 发布版本及校验文件
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ needs.version.outputs.tag }}
+          MACOS_SIGNED: ${{ needs.macos.outputs.signed }}
+        run: |
+          find release -mindepth 2 -type f -exec mv -n -t release {} +
+          cd release
+          find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS
+          if [ "$MACOS_SIGNED" = true ]; then
+            printf '双端构建与测试已通过。macOS 已签名并公证。\nWindows 安装包尚未配置 Authenticode 签名。\n' > "$RUNNER_TEMP/notes.md"
+          else
+            printf '双端构建与测试已通过。\nmacOS 缺少 Developer ID 签名和公证，本版本保留为草稿；其中 macOS ZIP 仅供开发测试。\nWindows 安装包尚未配置 Authenticode 签名。\n' > "$RUNNER_TEMP/notes.md"
+          fi
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            echo '版本已存在，拒绝覆盖。请使用新版本标签。' >&2
+            exit 1
+          fi
+          args=()
+          if [ "$MACOS_SIGNED" != true ]; then args+=(--draft); fi
+          mapfile -d '' files < <(find . -maxdepth 1 -type f -print0 | sort -z)
+          gh release create "$RELEASE_TAG" --verify-tag --title "闪传 $RELEASE_TAG" --notes-file "$RUNNER_TEMP/notes.md" "${args[@]}" "${files[@]}"

@@ -1,5 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
+    <StartupObject>Shanchuan.Windows.App</StartupObject>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
@@ -16,7 +17,13 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
   </PropertyGroup>
   <ItemGroup>
+    <PackageReference Include="Velopack" Version="1.2.161" />
     <ProjectReference Include="..\Shanchuan.Core\Shanchuan.Core.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <ApplicationDefinition Remove="App.xaml" />
+    <Page Include="App.xaml" />
+    <AssemblyMetadata Include="UpdateRepository" Value="$(UpdateRepository)" />
   </ItemGroup>
   <ItemGroup>
     <Resource Include="Assets\app.ico" />

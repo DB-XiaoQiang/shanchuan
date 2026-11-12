@@ -8,7 +8,7 @@ Windows 10/11 版本位于 `windows/`，采用 C#/.NET 8 + WPF。核心协议、
 
 ## macOS 构建
 
-要求 macOS 13 或更新版本、Apple Silicon，以及 Swift 5.9+（Xcode Command Line Tools）。项目不依赖第三方 Swift 包。
+要求 macOS 13 或更新版本、Apple Silicon，以及 Swift 5.9+（Xcode Command Line Tools）。应用通过 Swift Package Manager 集成 Sparkle 更新框架。
 
 ```sh
 swift build
@@ -58,3 +58,9 @@ python3 Tests/FTPConnection/mock_ftp.py
 
 
 同名不同后缀的普通文件（例如 `部署.pdf` 与 `部署.md`）同时发送时，会自动合并进一个 `闪传多格式-…` 文件夹，使用原有文件夹协议投递；接收后在该文件夹中查看两个原文件。完整文件名相同的文件仍需先自行区分名称。
+
+## 自动构建、发布与更新
+
+主分支提交和 PR 自动验证 macOS 与 Windows；版本号统一由 `VERSION` 管理。推送匹配版本的 `v*` 标签后自动构建发布包，并生成 GitHub Release；macOS 缺少正式签名公证时保留为草稿。
+
+两端已接入更新框架和检查更新入口。当前仓库保持私有，按决定暂不配置客户端更新源，现阶段从 GitHub Release 手动下载。配置清单、发布步骤和验收边界见 [发布与更新](docs/发布与更新.md)。

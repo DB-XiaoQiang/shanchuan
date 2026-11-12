@@ -2,7 +2,18 @@
 set -euo pipefail
 cd "${0:A:h:h}"
 SIGNING_IDENTITY="${COPYTOOL_SIGNING_IDENTITY:-}"
-if [[ -z "$SIGNING_IDENTITY" ]]; then
+UNSIGNED_CI="${SHANCHUAN_UNSIGNED_CI:-0}"
+VERSION="$(cat VERSION)"
+BUILD_NUMBER="${SHANCHUAN_BUILD_NUMBER:-1}"
+if [[ ! "$VERSION" =~ '^[0-9]+\.[0-9]+\.[0-9]+$' || "$BUILD_NUMBER" != <-> ]]; then
+    print -u2 'VERSION 必须为三段版本号，构建号必须为整数。'
+    exit 1
+fi
+if [[ "$UNSIGNED_CI" == 1 && "${CI:-}" != true ]]; then
+    print -u2 '无签名打包仅用于 CI 编译产物。'
+    exit 1
+fi
+if [[ "$UNSIGNED_CI" != 1 && -z "$SIGNING_IDENTITY" ]]; then
     SIGNING_IDENTITIES=( ${(f)"$(security find-identity -v -p codesigning | awk '/"Apple Development:/ {print $2}')"} )
     if (( ${#SIGNING_IDENTITIES} != 1 )); then
         print -u2 '请通过 COPYTOOL_SIGNING_IDENTITY 指定有效签名身份；需要稳定身份以保留辅助功能与钥匙串授权。'
@@ -15,7 +26,8 @@ if [[ "$SIGNING_IDENTITY" == '-' ]]; then
     exit 1
 fi
 ./scripts/build-icons.sh
-swift build
+swift build -c release
+BIN_DIR="$(swift build -c release --show-bin-path)"
 DIST="$PWD/dist"
 FINAL_APP="$DIST/闪传.app"
 FINAL_ZIP="$DIST/闪传-macos-arm64.zip"
@@ -42,7 +54,7 @@ cleanup_package() {
 trap cleanup_package EXIT
 APP="$PACKAGE_WORK/闪传.app"
 /bin/mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-/bin/cp .build/debug/CopyTool "$APP/Contents/MacOS/CopyTool"
+/bin/cp "$BIN_DIR/CopyTool" "$APP/Contents/MacOS/CopyTool"
 /bin/cp Resources/AppIcon.icns Resources/AppIcon.png "$APP/Contents/Resources/"
 cat > "$APP/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
@@ -55,15 +67,38 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 <key>CFBundleIconFile</key><string>AppIcon.icns</string>
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>NSPrincipalClass</key><string>NSApplication</string>
-<key>CFBundleShortVersionString</key><string>0.1.0</string>
-<key>CFBundleVersion</key><string>1</string>
+<key>CFBundleShortVersionString</key><string>VERSION_PLACEHOLDER</string>
+<key>CFBundleVersion</key><string>BUILD_PLACEHOLDER</string>
 <key>LSMinimumSystemVersion</key><string>13.0</string>
 <key>NSHighResolutionCapable</key><true/>
 <key>NSHumanReadableCopyright</key><string>Independent implementation, 2026</string>
 </dict></plist>
 PLIST
-codesign --force --sign "$SIGNING_IDENTITY" --timestamp=none "$APP"
-codesign --verify --deep --strict "$APP"
+/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" "$APP/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_NUMBER" "$APP/Contents/Info.plist"
+/bin/mkdir -p "$APP/Contents/Frameworks"
+FRAMEWORK="$BIN_DIR/Sparkle.framework"
+if [[ ! -d "$FRAMEWORK" ]]; then
+    FRAMEWORK="$(/usr/bin/find .build/artifacts -path '*/macos-arm64_x86_64/Sparkle.framework' -type d -print -quit)"
+fi
+[[ -d "$FRAMEWORK" ]] || { print -u2 '缺少 Sparkle.framework'; exit 1; }
+/usr/bin/ditto "$FRAMEWORK" "$APP/Contents/Frameworks/Sparkle.framework"
+# Sparkle's nested services keep their upstream signatures; sign the enclosing app.
+if [[ -n "${SHANCHUAN_UPDATE_FEED:-}" && -n "${SPARKLE_PUBLIC_KEY:-}" ]]; then
+    /usr/libexec/PlistBuddy -c "Add :SUFeedURL string $SHANCHUAN_UPDATE_FEED" "$APP/Contents/Info.plist"
+    /usr/libexec/PlistBuddy -c "Add :SUPublicEDKey string $SPARKLE_PUBLIC_KEY" "$APP/Contents/Info.plist"
+    /usr/libexec/PlistBuddy -c 'Add :SUEnableAutomaticChecks bool true' "$APP/Contents/Info.plist"
+fi
+if [[ "$UNSIGNED_CI" != 1 ]]; then
+    codesign --force --sign "$SIGNING_IDENTITY" --options runtime --timestamp "$APP"
+    codesign --verify --deep --strict "$APP"
+    if [[ -n "${NOTARY_KEYCHAIN_PROFILE:-}" ]]; then
+        /usr/bin/ditto -c -k --keepParent "$APP" "$PACKAGE_WORK/notarize.zip"
+        xcrun notarytool submit "$PACKAGE_WORK/notarize.zip" --keychain-profile "$NOTARY_KEYCHAIN_PROFILE" --wait
+        xcrun stapler staple "$APP"
+        xcrun stapler validate "$APP"
+    fi
+fi
 /usr/bin/ditto -c -k --keepParent "$APP" "$PACKAGE_WORK/闪传-macos-arm64.zip"
 if [[ -e "$FINAL_APP" ]]; then
     /bin/mv -- "$FINAL_APP" "$PACKAGE_WORK/previous.app"

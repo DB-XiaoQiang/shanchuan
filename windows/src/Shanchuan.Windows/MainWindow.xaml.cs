@@ -22,6 +22,7 @@ public partial class MainWindow : Window
         DataContext = viewModel;
         _viewModel.PropertyChanged += OnViewModelPropertyChanged;
         Closing += OnClosing;
+        Loaded += async (_, _) => await Services.AppUpdateService.CheckAsync(this, silent: true);
         UpdateMainProgress();
     }
 
@@ -95,6 +96,14 @@ public partial class MainWindow : Window
         view.Filter = item => item is TransferLogEntry log &&
             (query.Length == 0 || log.Message.Contains(query, StringComparison.OrdinalIgnoreCase));
         view.Refresh();
+    }
+
+    private async void CheckForUpdates(object sender, RoutedEventArgs e)
+    {
+        if (sender is not System.Windows.Controls.Button button) return;
+        button.IsEnabled = false;
+        try { await Services.AppUpdateService.CheckAsync(this); }
+        finally { button.IsEnabled = true; }
     }
 
     private void OpenSettings(object sender, RoutedEventArgs e)

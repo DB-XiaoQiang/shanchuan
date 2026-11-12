@@ -21,6 +21,7 @@
                 </StackPanel>
                 <StackPanel DockPanel.Dock="Bottom">
                     <TextBlock Text="请在配置中心明确选择内网或外网；权限由所选位置决定" TextWrapping="Wrap" Foreground="#667085" FontSize="12" Margin="4,12" />
+                    <Button Content="检查更新…" Click="CheckForUpdates" />
                     <Button Content="配置中心" Click="OpenSettings" Background="#EFF6FF" Foreground="#1D4ED8" />
                 </StackPanel>
                 <StackPanel>

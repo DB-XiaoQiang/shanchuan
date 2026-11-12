@@ -4,12 +4,20 @@ import AppKit
 @main struct CopyToolApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var delegate
     @StateObject private var model = AppModel()
+    @StateObject private var updates = AppUpdater()
     var body: some Scene {
         Window("闪传", id: "main") {
             RootView(model: model).frame(minWidth: 820, minHeight: 560)
-                .onAppear { delegate.connectTransferProgress(model) }
+                .onAppear {
+                    delegate.connectTransferProgress(model)
+                    updates.isTransferActive = { model.transferSnapshot.isActive || model.queued > 0 }
+                }
         }.defaultSize(width: 1000, height: 720)
         .commands {
+            CommandGroup(after: .appInfo) {
+                Button("检查更新…") { updates.check() }
+                    .disabled(!updates.canCheck || model.transferSnapshot.isActive || model.queued > 0)
+            }
             CommandGroup(after: .pasteboard) {
                 Button("添加文件…") { model.chooseFiles() }.keyboardShortcut("o")
                 Button("恢复选中记录") { if let item = model.selectedEntry { model.restore(item) } }.keyboardShortcut("r")

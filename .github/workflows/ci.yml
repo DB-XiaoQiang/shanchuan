@@ -1,0 +1,57 @@
+name: 双端构建与测试
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  macos:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: '16.4'
+      - name: Swift 版本
+        run: swift --version
+      - name: 测试
+        run: swift test
+      - name: FTP 回环集成测试
+        run: |
+          python3 Tests/Transfer/mock_ftp.py
+          python3 Tests/ProtocolTransfer/mock_ftp.py
+          python3 Tests/FTPConnection/mock_ftp.py
+      - name: Release 构建与打包（无签名测试产物）
+        env:
+          SHANCHUAN_UNSIGNED_CI: '1'
+          SHANCHUAN_BUILD_NUMBER: ${{ github.run_number }}
+        run: ./scripts/package.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Shanchuan-macos-arm64-unsigned
+          path: dist/*.zip
+          if-no-files-found: error
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: 编译
+        run: dotnet build windows/Shanchuan.sln -c Release
+      - name: 测试、发布和安装包
+        shell: pwsh
+        run: ./windows/scripts/publish.ps1 -Runtime win-x64 -Installer
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Shanchuan-windows-x64
+          path: |
+            windows/dist/Shanchuan-win-x64.zip
+            windows/dist/releases/*
+          if-no-files-found: error

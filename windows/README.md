@@ -73,8 +73,12 @@ windows/dist/publish/win-x64/Shanchuan.exe
 windows/dist/Shanchuan-win-x64.zip
 ```
 
-解压后运行 `Shanchuan.exe`，目标电脑无需另外安装 .NET 运行时。也可在 GitHub Actions 运行 **Windows 闪传** 工作流，下载 `Shanchuan-windows-x64` 构建产物。
+解压后运行 `Shanchuan.exe`，目标电脑无需另外安装 .NET 运行时。也可在 GitHub Actions 运行 **双端构建与测试** 工作流，下载 `Shanchuan-windows-x64` 构建产物。
 
 ## 验收边界
 
 核心协议、接收下载与删除、权限拒绝、MD5 失败保留、ZIP 安全、排除规则、持久化和进度统计有跨平台自动化测试，FTP 自动化仅连接 `127.0.0.1` 回环服务器。WPF 工程支持编译检查，但 Windows 剪贴板、全局热键、真实按键投递、凭据管理器、托盘、安装后启动和实际内外网服务器权限仍需在 Windows 10/11 与目标 FTP 环境中验收。不要把“连接测试成功”视为接收端已经处理文件。
+
+## 版本发布与应用更新
+
+共用仓库根目录的 `VERSION`。CI 同时生成 Velopack Setup 与更新包；应用有“检查更新…”入口，启动时也可检查。当前更新源按决定留空，使用私有 Release 手动下载；后续配置后从 Setup 安装版本启用应用内更新。详见 [发布与更新](../docs/发布与更新.md)。

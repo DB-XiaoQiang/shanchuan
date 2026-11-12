@@ -22,6 +22,15 @@ public partial class App : System.Windows.Application
     private bool _hotkeysInitialized;
     private int _copyInProgress;
 
+    [STAThread]
+    public static void Main(string[] args)
+    {
+        Velopack.VelopackApp.Build().Run();
+        var app = new App();
+        app.InitializeComponent();
+        app.Run();
+    }
+
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
