@@ -1,0 +1,2 @@
+# 验签针对原始字节，Windows 检出时也不得改写换行。
+Fixtures/** -text

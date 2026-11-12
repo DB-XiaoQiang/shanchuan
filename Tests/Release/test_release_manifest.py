@@ -115,19 +115,16 @@ class SparkleEmbeddedKeyTests(unittest.TestCase):
     def test_embedded_public_key_accepts_only_matching_archive_and_signature(self):
         with tempfile.TemporaryDirectory() as temporary:
             root=Path(temporary)
-            key=root/'key.pem'
-            release.openssl('genpkey','-algorithm','ED25519','-out',key)
-            public_der=release.openssl('pkey','-in',key,'-pubout','-outform','DER')
-            public=base64.b64encode(public_der[-32:]).decode()
-            archive=root/'update.zip';archive.write_bytes(b'Synthetic archive')
-            signature=root/'sig'
-            release.openssl('pkeyutl','-sign','-inkey',key,'-rawin','-in',archive,'-out',signature)
+            fixture=ROOT/'Fixtures/Sparkle'
+            public=(fixture/'public-key.base64').read_text().strip()
+            original=(fixture/'payload.bin').read_bytes()
+            archive=root/'update.zip';archive.write_bytes(original)
             arguments=['swift',str(ROOT/'scripts/verify-sparkle.swift'),str(archive),
-                       base64.b64encode(signature.read_bytes()).decode(),public]
+                       (fixture/'signature.base64').read_text().strip(),public]
             self.assertEqual(0,subprocess.run(arguments,capture_output=True).returncode)
             archive.write_bytes(b'Corrupted archive')
             self.assertNotEqual(0,subprocess.run(arguments,capture_output=True).returncode)
-            archive.write_bytes(b'Synthetic archive')
+            archive.write_bytes(original)
             arguments[-1]=base64.b64encode(b'x'*32).decode()
             self.assertNotEqual(0,subprocess.run(arguments,capture_output=True).returncode)
 

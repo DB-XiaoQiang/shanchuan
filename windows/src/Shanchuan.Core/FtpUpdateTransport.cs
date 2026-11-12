@@ -46,7 +46,7 @@ public sealed class FtpUpdateTransport(Func<bool>? isBusy = null, SemaphoreSlim?
         foreach (var version in versions)
         {
             var versionPath = root + "/" + version;
-            foreach (var batch in (await ListAsync(versionPath, settings, password, token)).Where(x => Guid.TryParseExact(x, "N", out _)).Take(64))
+            foreach (var batch in (await ListAsync(versionPath, settings, password, token)).Where(x => Guid.TryParseExact(x, "N", out _)))
             {
                 var directory = versionPath + "/" + batch;
                 var files = await ListAsync(directory, settings, password, token);

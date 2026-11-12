@@ -63,6 +63,28 @@ public sealed partial class FtpLoopbackTests
     }
 
     [Fact]
+    public async Task ReceiverFindsCommittedBatchAfterManyAbandonedAttempts()
+    {
+        using var server = new LoopbackFtpServer();
+        using var root = new TemporaryRoot();
+        using var fixture = new UpdateFixture();
+        const string versionRoot = "/share/shanchuan_updates/stable/win-x64/9.8.7/";
+        // Lexically earlier interrupted uploads must not hide a later complete delivery.
+        for (var index = 1; index <= 64; index++)
+            server.Seed(versionRoot + index.ToString("x32") + "/update-manifest.json", fixture.Bytes);
+        var committed = versionRoot + new string('f', 32) + "/";
+        foreach (var (name, content) in fixture.Files) server.Seed(committed + name, content);
+        server.Seed(committed + "update-manifest.json", fixture.Bytes);
+        server.Seed(committed + "update-manifest.sig", fixture.Signature);
+        var candidate = await new FtpUpdateTransport().ReceiveAsync(new UpdateCache(root.Path, fixture.Verifier),
+            fixture.Verifier, "0.3.0", Settings(server, NetworkMode.Internal), "fixture-password", default);
+        Assert.NotNull(candidate);
+        Assert.Equal("9.8.7", candidate.Manifest.Version);
+        Assert.DoesNotContain("DELE", server.Commands);
+        Assert.Empty(server.Errors);
+    }
+
+    [Fact]
     public async Task RelayWaitsForBusinessTransfersAndRejectsWrongNetworkModesBeforeConnecting()
     {
         using var server = new LoopbackFtpServer();
