@@ -3,6 +3,7 @@ using System.Drawing.Imaging;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using System.Windows.Automation;
 using Microsoft.Win32;
@@ -49,6 +50,7 @@ internal static class Program
         {
             failure = error;
             Console.Error.WriteLine(error);
+            TrySaveFailureDiagnostics();
             TryWriteReport(false, error.ToString());
         }
         finally
@@ -177,11 +179,13 @@ internal static class Program
         Require(!File.Exists(managed) && !process.HasExited, "Real old GUI installed or staged without consent.");
         SaveScreenshot(oldWindow, "old-gui-before-approval.png");
         Checks.Add("real-old-gui-shows-candidate-without-staging-or-installing-before-consent");
-        var invoke = Task.Run(() => Invoke(installButton));
-        var confirmation = WaitFor(() => FindConfirmation(oldPid), 30, "native real GUI update confirmation");
+        // A one-second production tick can briefly disable this button, or make
+        // RequestInstallAsync return after UIA observed an enabled value. Retry
+        // the real footer action only while no modal confirmation is present.
+        var (confirmation, invoke) = WaitForRealConfirmation(oldPid, oldWindow, managed, process);
         var yes = WaitFor(() => Find(confirmation, AutomationElement.AutomationIdProperty, "6"), 15, "native confirmation Yes button ID 6");
         Invoke(yes);
-        Require(invoke.Wait(TimeSpan.FromSeconds(30)), "Footer click did not return after confirmation.");
+        Require(invoke is not null && invoke.Wait(TimeSpan.FromSeconds(30)), "Footer click did not return after confirmation.");
         Checks.Add("real-footer-and-native-yes-confirmation-invoked");
         var newer = WaitFor(() => FindInstalledProcessExcept(oldPid), 180, "new GUI process after native replacement");
         GuiPids.Add(newer.Id);
@@ -212,7 +216,66 @@ internal static class Program
     private static void Require(bool condition, string message) { if (!condition) throw new InvalidOperationException(message); }
     private static AutomationElement? Find(AutomationElement root, AutomationProperty property, object value) => root.FindFirst(TreeScope.Descendants, new PropertyCondition(property, value));
     private static AutomationElement? FindWindow(int pid) => AutomationElement.RootElement.FindAll(TreeScope.Children, new PropertyCondition(AutomationElement.ProcessIdProperty, pid)).Cast<AutomationElement>().FirstOrDefault(x => x.Current.ControlType == ControlType.Window && x.Current.Name == "闪传");
-    private static AutomationElement? FindConfirmation(int pid) => AutomationElement.RootElement.FindAll(TreeScope.Children, new PropertyCondition(AutomationElement.ProcessIdProperty, pid)).Cast<AutomationElement>().FirstOrDefault(x => x.Current.Name == "闪传更新");
+    private static AutomationElement? FindConfirmation(int pid)
+    {
+        // Win32 MessageBox is an owned top-level window; providers may expose
+        // it beneath its owner instead of as a desktop UIA child.
+        AutomationElement? confirmation = null;
+        EnumWindows((handle, _) =>
+        {
+            GetWindowThreadProcessId(handle, out var ownerPid);
+            if (ownerPid == pid && WindowTitle(handle) == "闪传更新")
+            {
+                confirmation = AutomationElement.FromHandle(handle);
+                return false;
+            }
+            return true;
+        }, IntPtr.Zero);
+        if (confirmation is not null) return confirmation;
+        var owner = FindWindow(pid);
+        return owner?.FindFirst(TreeScope.Descendants, new AndCondition(
+            new PropertyCondition(AutomationElement.NameProperty, "闪传更新"),
+            new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Window)));
+    }
+    private static (AutomationElement Confirmation, Task? Invoke) WaitForRealConfirmation(int pid, AutomationElement window, string managedPackage, Process process)
+    {
+        var deadline = DateTimeOffset.UtcNow.AddSeconds(45);
+        var nextAttempt = DateTimeOffset.MinValue;
+        Task? pending = null;
+        var attempts = 0;
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            if (FindConfirmation(pid) is { } confirmation) return (confirmation, pending);
+            Require(!process.HasExited, "Old GUI exited before real update confirmation.");
+            Require(!File.Exists(managedPackage), "GUI staged native target without real update confirmation.");
+            if (pending?.IsFaulted == true)
+            {
+                var error = pending.Exception!.GetBaseException();
+                File.AppendAllText(Path.Combine(ReportRoot, "footer-invoke.log"), $"attempt {attempts}: {error.GetType().Name}: {error.Message}\n");
+                if (error is not ElementNotEnabledException and not ElementNotAvailableException) throw error;
+            }
+            if ((pending is null || pending.IsCompleted) && DateTimeOffset.UtcNow >= nextAttempt)
+            {
+                var button = Find(window, AutomationElement.NameProperty, "更新至 v" + TargetVersion);
+                if (button is not null && button.Current.IsEnabled)
+                {
+                    attempts++;
+                    File.AppendAllText(Path.Combine(ReportRoot, "footer-invoke.log"), $"attempt {attempts}: invoking enabled real footer\n");
+                    pending = Task.Run(() => Invoke(button));
+                    nextAttempt = DateTimeOffset.UtcNow.AddSeconds(1);
+                }
+            }
+            Thread.Sleep(100);
+        }
+        File.AppendAllText(Path.Combine(ReportRoot, "footer-invoke.log"), $"timeout: attempts={attempts}, taskStatus={pending?.Status.ToString() ?? "none"}\n");
+        throw new TimeoutException("Timed out waiting for native real GUI update confirmation.");
+    }
+    private static string WindowTitle(IntPtr handle)
+    {
+        var title = new StringBuilder(512);
+        GetWindowText(handle, title, title.Capacity);
+        return title.ToString();
+    }
     private static Process? FindInstalledProcessExcept(int oldPid) => Process.GetProcessesByName("Shanchuan").FirstOrDefault(p => p.Id != oldPid && IsUnder(SafeProcessPath(p), InstallRoot));
     private static string SafeProcessPath(Process process) { try { return process.MainModule?.FileName ?? "missing"; } catch { return "missing"; } }
     private static T WaitFor<T>(Func<T?> action, int seconds, string description) where T : class
@@ -267,6 +330,45 @@ internal static class Program
         finally { graphics.ReleaseHdc(dc); }
         image.Save(Path.Combine(ReportRoot, name), ImageFormat.Png);
     }
+    private static void TrySaveFailureDiagnostics()
+    {
+        if (ReportRoot.Length == 0) return;
+        try
+        {
+            var lines = new List<string> { "UIA properties only: Name / AutomationId / ControlType; no ValuePattern or password value is read." };
+            static string Describe(AutomationElement element)
+            {
+                var current = element.Current;
+                static string Clean(string value) => value.Replace("\r", " ").Replace("\n", " ")[..Math.Min(value.Replace("\r", " ").Replace("\n", " ").Length, 220)];
+                return $"Name={Clean(current.Name)} | Id={Clean(current.AutomationId)} | Type={current.ControlType.ProgrammaticName}";
+            }
+            foreach (AutomationElement window in AutomationElement.RootElement.FindAll(TreeScope.Children, Condition.TrueCondition))
+            {
+                try { lines.Add("TOP " + Describe(window)); }
+                catch (ElementNotAvailableException) { }
+            }
+            foreach (var pid in GuiPids)
+            {
+                var window = FindWindow(pid);
+                if (window is null) continue;
+                lines.Add("PRODUCT " + Describe(window));
+                var descendants = window.FindAll(TreeScope.Descendants, Condition.TrueCondition);
+                foreach (AutomationElement child in descendants.Cast<AutomationElement>().Take(180))
+                {
+                    try { lines.Add("  " + Describe(child)); }
+                    catch (ElementNotAvailableException) { }
+                }
+                try { SaveScreenshot(window, $"failure-product-{pid}.png"); } catch { }
+                if (FindConfirmation(pid) is { } confirmation)
+                    try { SaveScreenshot(confirmation, $"failure-confirmation-{pid}.png"); } catch { }
+            }
+            File.WriteAllLines(Path.Combine(ReportRoot, "failure-uia-tree.log"), lines);
+        }
+        catch (Exception error)
+        {
+            try { File.WriteAllText(Path.Combine(ReportRoot, "failure-diagnostics.log"), error.GetType().Name + ": " + error.Message); } catch { }
+        }
+    }
     private static void TryWriteReport(bool passed, string? error)
     {
         if (ReportRoot.Length == 0) return;
@@ -281,6 +383,10 @@ internal static class Program
             syntheticCredentialChecked = Checks.Contains("synthetic-windows-credential-preserved-across-both-gui-startups")
         }, JsonOptions));
     }
+    private delegate bool EnumWindowsCallback(IntPtr window, IntPtr parameter);
+    [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool EnumWindows(EnumWindowsCallback callback, IntPtr parameter);
+    [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr window, out uint processId);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetWindowText(IntPtr window, StringBuilder title, int maximum);
     [StructLayout(LayoutKind.Sequential)] private struct Rect { public int Left, Top, Right, Bottom; }
     [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool GetWindowRect(IntPtr window, out Rect rect);
     [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool PrintWindow(IntPtr window, IntPtr dc, uint flags);

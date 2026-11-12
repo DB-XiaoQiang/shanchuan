@@ -45,7 +45,7 @@ try {
     Invoke-Checked 'dotnet' @('tool', 'restore')
     $Product = Join-Path $RepositoryRoot 'windows/src/Shanchuan.Windows/Shanchuan.Windows.csproj'
     Invoke-Checked 'dotnet' @('publish', $Product, '-c', 'Release', '-r', 'win-x64', '--self-contained', 'true', '-o', $ProductOutput,
-        "-p:Version=$TargetVersion", '-p:PublishSingleFile=true', '-p:IncludeNativeLibrariesForSelfExtract=true', '-p:DebugType=None', '-p:DebugSymbols=false')
+        "-p:Version=$TargetVersion", '-p:UpdateRepository=https://github.com/DB-XiaoQiang/shanchuan', '-p:PublishSingleFile=true', '-p:IncludeNativeLibrariesForSelfExtract=true', '-p:DebugType=None', '-p:DebugSymbols=false')
     Invoke-Checked 'dotnet' @('vpk', 'pack', '--packId', 'Shanchuan', '--packVersion', $TargetVersion, '--packDir', $ProductOutput,
         '--mainExe', 'Shanchuan.exe', '--packTitle', '闪传', '--runtime', 'win-x64', '--channel', 'win-x64',
         '--icon', (Join-Path $RepositoryRoot 'windows/src/Shanchuan.Windows/Assets/app.ico'), '--outputDir', $Feed)
