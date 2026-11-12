@@ -21,6 +21,8 @@ internal static class Program
     private static readonly List<int> GuiPids = [];
     private static readonly string FixturePassword = "ci-synthetic-" + Guid.NewGuid().ToString("N");
     private static bool CreatedCredential;
+    private static readonly Dictionary<int, string> ProcessObservations = [];
+    private sealed record ReadyGui(Process Process, AutomationElement Window);
 
     [STAThread]
     public static int Main(string[] args)
@@ -55,6 +57,7 @@ internal static class Program
         }
         finally
         {
+            TrySaveNativeUpdateLogs();
             try { CleanupOwnedInstallation(); }
             catch (Exception error)
             {
@@ -187,11 +190,13 @@ internal static class Program
         Invoke(yes);
         Require(invoke is not null && invoke.Wait(TimeSpan.FromSeconds(30)), "Footer click did not return after confirmation.");
         Checks.Add("real-footer-and-native-yes-confirmation-invoked");
-        var newer = WaitFor(() => FindInstalledProcessExcept(oldPid), 180, "new GUI process after native replacement");
-        GuiPids.Add(newer.Id);
+        // Velopack starts short-lived Shanchuan hook processes while replacing
+        // files. Accept only the actual relaunched main GUI with every version,
+        // PID, window and footer condition satisfied together.
+        var ready = WaitFor(() => FindReadyUpdatedGui(process, executable), 180, "restarted target GUI, native file version, footer and old process exit");
+        var newer = ready.Process;
+        var newWindow = ready.Window;
         Require(newer.Id != oldPid && ProductVersion(executable) == TargetVersion, "Native replacement did not change PID and actual GUI version.");
-        var newWindow = WaitFor(() => FindWindow(newer.Id), 60, "new GUI window");
-        WaitFor(() => Find(newWindow, AutomationElement.NameProperty, "当前版本 v" + TargetVersion), 60, "new GUI footer version");
         Require(process.HasExited, "Old GUI remained running after native restart.");
         Require(new SettingsStore(AppData).Load().NetworkMode == NetworkMode.Unconfigured, "Network mode changed during upgrade.");
         Require(DataSnapshot().OrderBy(x => x.Key).SequenceEqual(baseline.OrderBy(x => x.Key)), "Settings, history or referenced media changed during GUI upgrade.");
@@ -276,7 +281,46 @@ internal static class Program
         GetWindowText(handle, title, title.Capacity);
         return title.ToString();
     }
-    private static Process? FindInstalledProcessExcept(int oldPid) => Process.GetProcessesByName("Shanchuan").FirstOrDefault(p => p.Id != oldPid && IsUnder(SafeProcessPath(p), InstallRoot));
+    private static ReadyGui? FindReadyUpdatedGui(Process oldProcess, string executable)
+    {
+        var installedVersion = SafeProductVersion(executable);
+        var oldExited = oldProcess.HasExited;
+        foreach (var candidate in Process.GetProcessesByName("Shanchuan"))
+        {
+            var retained = false;
+            try
+            {
+                if (candidate.Id == oldProcess.Id) continue;
+                var path = SafeProcessPath(candidate);
+                if (!IsUnder(path, InstallRoot)) continue;
+                if (!GuiPids.Contains(candidate.Id)) GuiPids.Add(candidate.Id);
+                var version = SafeProductVersion(path);
+                var window = FindWindow(candidate.Id);
+                var footerPresent = window is not null && Find(window, AutomationElement.NameProperty, "当前版本 v" + TargetVersion) is not null;
+                var observation = $"pid={candidate.Id} productVersion={version} installedVersion={installedVersion} mainWindow={window is not null} targetFooter={footerPresent} oldExited={oldExited}";
+                if (!ProcessObservations.TryGetValue(candidate.Id, out var previous) || previous != observation)
+                {
+                    ProcessObservations[candidate.Id] = observation;
+                    File.AppendAllText(Path.Combine(ReportRoot, "native-process-observations.log"), observation + "\n");
+                }
+                if (oldExited && installedVersion == TargetVersion && version == TargetVersion && window is not null && footerPresent &&
+                    Path.GetFullPath(path).Equals(Path.GetFullPath(executable), StringComparison.OrdinalIgnoreCase) && !candidate.HasExited)
+                {
+                    retained = true;
+                    return new ReadyGui(candidate, window);
+                }
+            }
+            catch (ElementNotAvailableException) { }
+            catch (InvalidOperationException) { }
+            finally { if (!retained) candidate.Dispose(); }
+        }
+        return null;
+    }
+    private static string SafeProductVersion(string executable)
+    {
+        try { return ProductVersion(executable); }
+        catch (Exception error) when (error is IOException or System.ComponentModel.Win32Exception or ArgumentException) { return "unavailable-during-replacement"; }
+    }
     private static string SafeProcessPath(Process process) { try { return process.MainModule?.FileName ?? "missing"; } catch { return "missing"; } }
     private static T WaitFor<T>(Func<T?> action, int seconds, string description) where T : class
     {
@@ -329,6 +373,32 @@ internal static class Program
         try { Require(PrintWindow(handle, dc, 2), "Could not capture actual product GUI."); }
         finally { graphics.ReleaseHdc(dc); }
         image.Save(Path.Combine(ReportRoot, name), ImageFormat.Png);
+    }
+    private static void TrySaveNativeUpdateLogs()
+    {
+        if (ReportRoot.Length == 0) return;
+        // Official Windows default: LocalAppData/velopack/velopack_<packId>.log.
+        // Read only this disposable test's product log, with sharing while the
+        // updater may still be writing it. No command line or environment dump.
+        var sources = new[]
+        {
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "velopack", "velopack_Shanchuan.log"),
+            Path.Combine(Path.GetTempPath(), "velopack_Shanchuan.log")
+        };
+        for (var index = 0; index < sources.Length; index++)
+        {
+            try
+            {
+                if (!File.Exists(sources[index])) continue;
+                using var input = new FileStream(sources[index], FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+                using var output = File.Create(Path.Combine(ReportRoot, $"native-update-default-{index}.log"));
+                input.CopyTo(output);
+            }
+            catch (Exception error)
+            {
+                try { File.AppendAllText(Path.Combine(ReportRoot, "native-log-copy.log"), error.GetType().Name + ": " + error.Message + "\n"); } catch { }
+            }
+        }
     }
     private static void TrySaveFailureDiagnostics()
     {
