@@ -45,6 +45,11 @@ public sealed partial class AppViewModel
 
     private void Enqueue(HistoryEntry entry)
     {
+        if (_updateInstallationPaused)
+        {
+            StatusMessage = "正在准备安装更新，请稍候。";
+            return;
+        }
         try { NetworkPolicy.RequireUpload(Settings); }
         catch (InvalidOperationException error)
         {
@@ -116,7 +121,12 @@ public sealed partial class AppViewModel
                             entry.Title, values.Fraction >= 1 ? "正在发布控制文件" : "正在上传",
                             values.Fraction, values.UploadedBytes, values.TotalBytes, GetQueuedCount())));
 
-                    await _ftp.UploadPreparedAsync(transfer, settings, password, uploadProgress, current.Token).ConfigureAwait(false);
+                    await _updateTransferGate.WaitAsync(current.Token).ConfigureAwait(false);
+                    try
+                    {
+                        await _ftp.UploadPreparedAsync(transfer, settings, password, uploadProgress, current.Token).ConfigureAwait(false);
+                    }
+                    finally { _updateTransferGate.Release(); }
                 }
 
                 OnUi(() =>

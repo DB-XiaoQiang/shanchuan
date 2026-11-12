@@ -11,13 +11,17 @@ from urllib.parse import quote, urlparse
 
 root = pathlib.Path(__file__).resolve().parents[1]
 archive = root / 'dist/Shanchuan-macos-arm64.zip'
-feed = os.environ.get('SHANCHUAN_UPDATE_FEED', '')
+feed = os.environ.get('SHANCHUAN_UPDATE_FEED') or 'https://github.com/DB-XiaoQiang/shanchuan/releases/latest/download/appcast.xml'
 key = os.environ.get('SPARKLE_PRIVATE_KEY', '')
 if not key:
     raise SystemExit('配置更新源后必须同时配置 SPARKLE_PRIVATE_KEY。')
 if urlparse(feed).scheme != 'https':
     raise SystemExit('正式更新源必须使用 HTTPS。')
-base = os.environ.get('MACOS_DOWNLOAD_BASE', '')
+version = (root / 'VERSION').read_text().strip()
+tag = os.environ.get('RELEASE_TAG') or 'v' + version
+if tag != 'v' + version:
+    raise SystemExit('appcast 标签和 VERSION 不一致。')
+base = f'https://github.com/DB-XiaoQiang/shanchuan/releases/download/{tag}'
 if urlparse(base).scheme != 'https':
     raise SystemExit('需要 MACOS_DOWNLOAD_BASE（更新包所在 HTTPS 目录）。')
 tools = list((root / '.build/artifacts').glob('**/bin/sign_update'))
@@ -34,6 +38,18 @@ if not match:
     raise SystemExit('Sparkle 签名输出格式不正确。')
 with (root / 'dist/闪传.app/Contents/Info.plist').open('rb') as stream:
     info = plistlib.load(stream)
+if info['CFBundleShortVersionString'] != version:
+    raise SystemExit('macOS 包版本与 VERSION 不一致。')
+embedded_key = info.get('SUPublicEDKey', '')
+repository_key = (root / 'Resources/sparkle-public-key.txt').read_text().strip()
+if not embedded_key or embedded_key != repository_key:
+    raise SystemExit('应用内 Sparkle 公钥与仓库验签材料不一致。')
+try:
+    subprocess.run(['swift', str(root / 'scripts/verify-sparkle.swift'), str(archive),
+                    match.group(1), embedded_key], capture_output=True, check=True)
+except subprocess.CalledProcessError:
+    raise SystemExit('Sparkle 更新包未通过应用内公钥验签，禁止发布。') from None
+
 ns = 'http://www.andymatuschak.org/xml-namespaces/sparkle'
 ET.register_namespace('sparkle', ns)
 rss = ET.Element('rss', version='2.0')

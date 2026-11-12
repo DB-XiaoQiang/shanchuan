@@ -15,6 +15,7 @@ import Combine
     @Published var progress = 0.0
     @Published var activeTransfer = ""
     @Published var queued = 0
+    var updateInstallationIsCommitting = false
     @Published var transferSnapshot = TransferProgressSnapshot()
     var previewTransferProgress: (() -> Void)?
     var showTransferProgressCard: (() -> Void)?
@@ -352,6 +353,7 @@ import Combine
         enqueue(entry)
     }
     func enqueue(_ entry: HistoryEntry) {
+        guard !updateInstallationIsCommitting else { log("正在安装更新，请稍后再发送", level: .warning); return }
         if let issue = preferences.validationError { log("未发送：\(issue)", level: .error); return }
         guard !password.isEmpty else { log("未发送：请在设置中填写密码", level: .error); return }
         tasks.append((entry, preferences, password)); queued = tasks.count
@@ -378,6 +380,8 @@ import Combine
         let transfer = self.transfer
         transfer.resetCancellation()
         worker.async { [self] in
+            UpdateTransferGate.shared.beginBusiness()
+            defer { UpdateTransferGate.shared.end() }
             var temporary: [URL] = []
             defer { for url in temporary { try? FileManager.default.removeItem(at: url) } }
             do {

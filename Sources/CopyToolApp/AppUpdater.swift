@@ -1,37 +1,64 @@
 import AppKit
 import Sparkle
+import CopyToolCore
 
-/// Only packaged builds with an explicit feed and signing key start network checks.
+/// Sparkle is created only after explicit approval, never by the daily checker.
 @MainActor final class AppUpdater: NSObject, ObservableObject, SPUUpdaterDelegate {
     private var controller: SPUStandardUpdaterController?
-    @Published private(set) var canCheck = true
+    private var approvedVersion: String?
     var isTransferActive: () -> Bool = { false }
+    var setInstallationCommitting: (Bool) -> Void = { _ in }
+    var cycleFinished: (String?) -> Void = { _ in }
+    var report: (String) -> Void = { _ in }
     override init() {
         super.init()
-        guard let feed = Bundle.main.object(forInfoDictionaryKey: "SUFeedURL") as? String,
-              !feed.isEmpty,
-              let key = Bundle.main.object(forInfoDictionaryKey: "SUPublicEDKey") as? String,
-              !key.isEmpty else { return }
-        controller = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: self, userDriverDelegate: nil)
+        // Migrate previous Sparkle preferences before any updater is created.
+        for key in ["SUEnableAutomaticChecks", "SUAutomaticallyUpdate", "SUAutomaticallyDownloadUpdates"] {
+            UserDefaults.standard.set(false, forKey: key)
+        }
+    }
+    func install(version: String) -> Bool {
+        guard let key = Bundle.main.object(forInfoDictionaryKey: "SUPublicEDKey") as? String, !key.isEmpty else {
+            report("此构建尚未配置 Sparkle 验签公钥，请手动安装正式 DMG。")
+            return false
+        }
+        if let controller, !controller.updater.canCheckForUpdates { report("更新安装流程正在进行。"); return false }
+        approvedVersion = version
+        let updaterController = SPUStandardUpdaterController(startingUpdater: false, updaterDelegate: self, userDriverDelegate: nil)
+        updaterController.updater.automaticallyChecksForUpdates = false
+        updaterController.updater.automaticallyDownloadsUpdates = false
+        updaterController.updater.clearFeedURLFromUserDefaults()
+        controller = updaterController
+        updaterController.startUpdater()
+        updaterController.checkForUpdates(nil)
+        return true
+    }
+    func feedURLString(for updater: SPUUpdater) -> String? {
+        guard let approvedVersion else { return nil }
+        return UpdateCoordinator.repository + "/releases/download/v" + approvedVersion + "/appcast.xml"
+    }
+    static func validateTarget(actual: String, approved: String?) throws {
+        guard let approved, actual == approved else { throw UpdateFailure.invalid("更新源返回的版本与已确认版本不一致。") }
+    }
+    func updater(_ updater: SPUUpdater, shouldProceedWithUpdate updateItem: SUAppcastItem, updateCheck: SPUUpdateCheck) throws {
+        try Self.validateTarget(actual: updateItem.displayVersionString, approved: approvedVersion)
     }
     func updater(_ updater: SPUUpdater, shouldPostponeRelaunchForUpdate item: SUAppcastItem,
                  untilInvokingBlock installHandler: @escaping () -> Void) -> Bool {
-        guard isTransferActive() else { return false }
+        guard isTransferActive() else { setInstallationCommitting(true); return false }
         Task { @MainActor in
-            while isTransferActive() { try? await Task.sleep(nanoseconds: 1_000_000_000) }
+            while isTransferActive() { try? await Task.sleep(nanoseconds: 500_000_000) }
+            setInstallationCommitting(true)
             installHandler()
         }
         return true
     }
-    func check() {
-        guard let controller else {
-            let alert = NSAlert()
-            alert.messageText = "此构建尚未配置自动更新"
-            alert.informativeText = "请从项目 Release 下载新版本，或联系维护者配置更新源和签名。"
-            alert.runModal()
-            return
-        }
-        guard controller.updater.canCheckForUpdates else { return }
-        controller.checkForUpdates(nil)
+    func updater(_ updater: SPUUpdater, didAbortWithError error: Error) {
+        setInstallationCommitting(false)
+        cycleFinished(error.localizedDescription)
+    }
+    func updater(_ updater: SPUUpdater, didFinishUpdateCycleFor updateCheck: SPUUpdateCheck, error: Error?) {
+        setInstallationCommitting(false)
+        cycleFinished(error?.localizedDescription)
     }
 }

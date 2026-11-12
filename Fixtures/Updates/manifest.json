@@ -1,0 +1,1 @@
+{"schemaVersion":1,"product":"Shanchuan","channel":"stable","version":"9.8.7","releaseNotes":"Cross-platform signature fixture","assets":[{"platform":"windows","arch":"x64","kind":"velopack-full","name":"payload.bin","size":32,"sha256":"13c79e38425743d86c07e866435d219bd02b19236de83d6f1cf0746e174bf03f"}]}

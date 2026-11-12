@@ -5,6 +5,7 @@ import CopyToolCore
 
 struct RootView: View {
     @ObservedObject var model: AppModel
+    @ObservedObject var updates: UpdateCoordinator
     @State private var page = "history"
     @State private var showClear = false
     @State private var dropped = false
@@ -23,6 +24,18 @@ struct RootView: View {
                 Text("本机历史 · 快捷键投递").font(.caption).foregroundStyle(.secondary)
                 if #available(macOS 14.0, *) { SettingsLink { Text("配置中心…") } }
                 else { Button("配置中心…") { NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil) } }
+                Divider()
+                Text("版本 " + updates.displayedVersion).font(.caption).foregroundStyle(.secondary)
+                Text(updates.status).font(.caption).textSelection(.enabled)
+                if !updates.relayStatus.isEmpty { Text(updates.relayStatus).font(.caption2).foregroundStyle(.secondary) }
+                HStack {
+                    Button("检查更新") { updates.check() }.disabled(!updates.canCheck)
+                    Button("重试") { updates.retry() }.disabled(updates.isChecking || updates.isRelaying)
+                }.controlSize(.small)
+                if updates.canInstall {
+                    Button("更新至 " + (updates.candidateVersion ?? "")) { updates.requestInstall() }
+                        .buttonStyle(.borderedProminent).controlSize(.small)
+                }
             }.padding()
         } detail: {
             VStack(spacing: 0) {
@@ -137,7 +150,7 @@ struct RootView: View {
                     AppLogo(size: 80)
                     VStack(alignment: .leading, spacing: 4) {
                         Text("闪传").font(.largeTitle)
-                        Text("0.1.0").foregroundStyle(.secondary)
+                        Text(updates.displayedVersion).foregroundStyle(.secondary)
                     }
                 }
                 Text("根据本机应用的界面与静态证据，独立实现的 macOS 剪贴板与 FTP 投递工具。")
@@ -148,7 +161,7 @@ struct RootView: View {
                     Text("先在配置中心设置 FTP 与自定义快捷键。自定义复制执行复制、记录并发送到内网，自定义粘贴只在当前应用粘贴。Command+C 等普通复制只改变系统剪贴板，既不记录也不上传。拖入或添加文件、手动“重新发送”也可投递。“开启历史记录”只控制明确发送内容是否留记录。恢复剪贴板不会新增记录或发送。关闭主窗口后可通过菜单栏重新显示。") .frame(maxWidth: .infinity, alignment: .leading).padding(8)
                 }
                 GroupBox("兼容范围") {
-                    Text("文本、文件与文件夹已通过原内网接收端验证；加密 Office 实际解密与自动更新未验证。原 FTP 配置可在配置中心显式迁移。本程序使用独立数据目录，不读取原版历史或授权。") .frame(maxWidth: .infinity, alignment: .leading).padding(8)
+                    Text("文本、文件与文件夹已通过原内网接收端验证；加密 Office 实际解密仍需实际环境验证；应用自动更新需要签名正式版本，首次需手动安装。原 FTP 配置可在配置中心显式迁移。本程序使用独立数据目录，不读取原版历史或授权。") .frame(maxWidth: .infinity, alignment: .leading).padding(8)
                 }
                 Button("打开本地数据目录") { NSWorkspace.shared.open(model.root) }
             }.padding(24)

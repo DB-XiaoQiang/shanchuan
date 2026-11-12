@@ -11,3 +11,10 @@ VALIDATION.md
 windows/**/bin/
 windows/**/obj/
 windows/dist/
+
+# Python checks and signing credentials are never distribution sources.
+__pycache__/
+*.py[cod]
+*.p12
+*.p8
+*-private-key.pem

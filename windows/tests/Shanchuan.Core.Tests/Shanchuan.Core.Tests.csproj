@@ -20,5 +20,6 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\Shanchuan.Core\Shanchuan.Core.csproj" />
+    <Compile Include="../../src/Shanchuan.Windows/Services/UpdateInstallAuthorization.cs" Link="UpdateInstallAuthorization.cs" />
   </ItemGroup>
 </Project>

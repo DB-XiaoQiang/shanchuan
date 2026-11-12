@@ -10,6 +10,12 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 jobs:
+  release-tools:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 发行清单和发布门禁测试
+        run: python3 -m unittest discover -s Tests/Release -p 'test_*.py'
   macos:
     runs-on: macos-15
     steps:
@@ -19,6 +25,8 @@ jobs:
           xcode-version: '16.4'
       - name: Swift 版本
         run: swift --version
+      - name: 更新包签名工具测试
+        run: python3 -m unittest discover -s Tests/Release -p 'test_*.py'
       - name: 测试
         run: swift test
       - name: FTP 回环集成测试

@@ -192,13 +192,15 @@ public sealed partial class AppViewModel : ObservableObject, IDisposable
 
     public async Task TestConnectionAsync()
     {
-        if (IsTestingConnection) return;
+        if (IsTestingConnection || _updateInstallationPaused) return;
         IsTestingConnection = true;
         ConnectionTestStatus = "正在测试连接和目录访问…";
         _connectionTestCts = new CancellationTokenSource();
         try
         {
-            await _ftp.TestConnectionAsync(Settings.Clone(), _password, _connectionTestCts.Token);
+            await _updateTransferGate.WaitAsync(_connectionTestCts.Token);
+            try { await _ftp.TestConnectionAsync(Settings.Clone(), _password, _connectionTestCts.Token); }
+            finally { _updateTransferGate.Release(); }
             ConnectionTestStatus = "连接成功，账号登录和目标目录访问正常。未上传文件。";
         }
         catch (TimeoutException) { ConnectionTestStatus = "连接超时，请检查服务器地址、端口和网络。"; }
@@ -305,6 +307,7 @@ public sealed partial class AppViewModel : ObservableObject, IDisposable
 
     public void Dispose()
     {
+        Updates?.Dispose();
         CancelTransfers();
         _lifetimeCts.Cancel();
         lock (_receiveSync) _receiveCycleCts?.Cancel();

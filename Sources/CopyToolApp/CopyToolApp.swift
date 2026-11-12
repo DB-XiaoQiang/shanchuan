@@ -4,19 +4,32 @@ import AppKit
 @main struct CopyToolApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var delegate
     @StateObject private var model = AppModel()
-    @StateObject private var updates = AppUpdater()
+    @StateObject private var updater = AppUpdater()
+    @StateObject private var updates = UpdateCoordinator()
     var body: some Scene {
         Window("闪传", id: "main") {
-            RootView(model: model).frame(minWidth: 820, minHeight: 560)
+            RootView(model: model, updates: updates).frame(minWidth: 820, minHeight: 560)
                 .onAppear {
                     delegate.connectTransferProgress(model)
-                    updates.isTransferActive = { model.transferSnapshot.isActive || model.queued > 0 }
+                    updates.businessIsBusy = { model.transferSnapshot.isActive || model.queued > 0 }
+                    updates.ftpSettings = {
+                        guard model.preferences.validationError == nil else { return nil }
+                        return .init(host: model.preferences.host, port: model.preferences.port,
+                            username: model.preferences.username, password: model.password, directory: model.preferences.directory)
+                    }
+                    updates.install = { updater.install(version: $0) }
+                    updates.writeLog = { text, error in model.log(text, level: error ? .warning : .info) }
+                    updater.isTransferActive = { model.transferSnapshot.isActive || model.queued > 0 || updates.isRelaying }
+                    updater.setInstallationCommitting = { model.updateInstallationIsCommitting = $0 }
+                    updater.cycleFinished = { updates.installationCycleFinished(error: $0) }
+                    updater.report = { model.log($0, level: .warning) }
+                    updates.start()
                 }
         }.defaultSize(width: 1000, height: 720)
         .commands {
             CommandGroup(after: .appInfo) {
                 Button("检查更新…") { updates.check() }
-                    .disabled(!updates.canCheck || model.transferSnapshot.isActive || model.queued > 0)
+                    .disabled(!updates.canCheck)
             }
             CommandGroup(after: .pasteboard) {
                 Button("添加文件…") { model.chooseFiles() }.keyboardShortcut("o")

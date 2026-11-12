@@ -13,7 +13,7 @@ public sealed partial class AppViewModel
 
     public string NetworkStatus => NetworkPolicy.DisplayName(Settings.NetworkMode);
     public string ReceiveStatus { get => _receiveStatus; private set => SetProperty(ref _receiveStatus, value); }
-    public bool CanSend => Settings.NetworkMode == NetworkMode.External;
+    public bool CanSend => Settings.NetworkMode == NetworkMode.External && !_updateInstallationPaused;
 
     private static string IdleReceiveStatus(NetworkMode mode) => mode switch
     {
@@ -53,6 +53,12 @@ public sealed partial class AppViewModel
         while (!_lifetimeCts.IsCancellationRequested)
         {
             var settings = Settings.Clone();
+            if (_updateInstallationPaused)
+            {
+                try { await Task.Delay(500, _lifetimeCts.Token).ConfigureAwait(false); }
+                catch (OperationCanceledException) { return; }
+                continue;
+            }
             if (settings.NetworkMode != NetworkMode.Internal)
             {
                 OnUi(() => ReceiveStatus = IdleReceiveStatus(settings.NetworkMode));
@@ -62,7 +68,11 @@ public sealed partial class AppViewModel
             }
 
             using var current = CancellationTokenSource.CreateLinkedTokenSource(_lifetimeCts.Token);
-            lock (_receiveSync) _receiveCycleCts = current;
+            lock (_receiveSync)
+            {
+                if (_updateInstallationPaused) continue;
+                _receiveCycleCts = current;
+            }
             try
             {
                 if (settings.ValidateForTransfer() is { } validationError)
@@ -72,8 +82,13 @@ public sealed partial class AppViewModel
                 else
                 {
                     OnUi(() => ReceiveStatus = "内网 · 正在检查外网投递…");
-                    var result = await _receiver.ReceivePendingAsync(settings, _password, current.Token)
-                        .ConfigureAwait(false);
+                    await _updateTransferGate.WaitAsync(current.Token).ConfigureAwait(false);
+                    ReceiveBatchResult result;
+                    try
+                    {
+                        result = await _receiver.ReceivePendingAsync(settings, _password, current.Token).ConfigureAwait(false);
+                    }
+                    finally { _updateTransferGate.Release(); }
                     OnUi(() => ApplyReceiveResult(result));
                 }
             }

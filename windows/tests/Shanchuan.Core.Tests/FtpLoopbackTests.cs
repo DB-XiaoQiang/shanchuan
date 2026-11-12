@@ -7,7 +7,7 @@ using Xunit;
 
 namespace Shanchuan.Core.Tests;
 
-public sealed class FtpLoopbackTests
+public sealed partial class FtpLoopbackTests
 {
     [Fact]
     public async Task UploadsExactProtocolOverLoopbackFtp()
@@ -406,8 +406,9 @@ public sealed class FtpLoopbackTests
                             using (var data = await passive.AcceptTcpClientAsync(_lifetime.Token))
                             {
                                 var directory = RemotePath(cwd, argument).TrimEnd('/');
-                                var names = Files.Keys.Where(path => string.Equals(Parent(path), directory, StringComparison.Ordinal))
-                                    .Select(Path.GetFileName).OrderBy(name => name, StringComparer.Ordinal);
+                                var names = Files.Keys.Where(path => path.StartsWith(directory + "/", StringComparison.Ordinal))
+                                    .Select(path => path[(directory.Length + 1)..].Split('/')[0])
+                                    .Distinct(StringComparer.Ordinal).OrderBy(name => name, StringComparer.Ordinal);
                                 var listing = string.Join("\r\n", names) + "\r\n";
                                 await data.GetStream().WriteAsync(new UTF8Encoding(false).GetBytes(listing), _lifetime.Token);
                             }

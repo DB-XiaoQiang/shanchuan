@@ -5,6 +5,8 @@ SIGNING_IDENTITY="${COPYTOOL_SIGNING_IDENTITY:-}"
 UNSIGNED_CI="${SHANCHUAN_UNSIGNED_CI:-0}"
 VERSION="$(cat VERSION)"
 BUILD_NUMBER="${SHANCHUAN_BUILD_NUMBER:-1}"
+SHANCHUAN_UPDATE_FEED="${SHANCHUAN_UPDATE_FEED:-https://github.com/DB-XiaoQiang/shanchuan/releases/latest/download/appcast.xml}"
+SPARKLE_PUBLIC_KEY="${SPARKLE_PUBLIC_KEY:-$(cat Resources/sparkle-public-key.txt)}"
 if [[ ! "$VERSION" =~ '^[0-9]+\.[0-9]+\.[0-9]+$' || "$BUILD_NUMBER" != <-> ]]; then
     print -u2 'VERSION 必须为三段版本号，构建号必须为整数。'
     exit 1
@@ -74,7 +76,7 @@ trap cleanup_package EXIT
 APP="$PACKAGE_WORK/闪传.app"
 /bin/mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 /bin/cp "$BIN_DIR/CopyTool" "$APP/Contents/MacOS/CopyTool"
-/bin/cp Resources/AppIcon.icns Resources/AppIcon.png "$APP/Contents/Resources/"
+/bin/cp Resources/AppIcon.icns Resources/AppIcon.png Resources/update-public-key.pem Resources/sparkle-public-key.txt "$APP/Contents/Resources/"
 cat > "$APP/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -110,7 +112,10 @@ fi
 if [[ -n "${SHANCHUAN_UPDATE_FEED:-}" && -n "${SPARKLE_PUBLIC_KEY:-}" ]]; then
     /usr/libexec/PlistBuddy -c "Add :SUFeedURL string $SHANCHUAN_UPDATE_FEED" "$APP/Contents/Info.plist"
     /usr/libexec/PlistBuddy -c "Add :SUPublicEDKey string $SPARKLE_PUBLIC_KEY" "$APP/Contents/Info.plist"
-    /usr/libexec/PlistBuddy -c 'Add :SUEnableAutomaticChecks bool true' "$APP/Contents/Info.plist"
+    /usr/libexec/PlistBuddy -c 'Add :SUEnableAutomaticChecks bool false' "$APP/Contents/Info.plist"
+    /usr/libexec/PlistBuddy -c 'Add :SUAllowsAutomaticUpdates bool false' "$APP/Contents/Info.plist"
+    /usr/libexec/PlistBuddy -c 'Add :SUAutomaticallyUpdate bool false' "$APP/Contents/Info.plist"
+    /usr/libexec/PlistBuddy -c 'Add :SUAutomaticallyDownloadUpdates bool false' "$APP/Contents/Info.plist"
 fi
 if [[ "$UNSIGNED_CI" != 1 ]]; then
     # Re-sign nested code from the inside out, preserving Sparkle entitlements.

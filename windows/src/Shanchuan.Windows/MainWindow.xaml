@@ -21,7 +21,16 @@
                 </StackPanel>
                 <StackPanel DockPanel.Dock="Bottom">
                     <TextBlock Text="请在配置中心明确选择内网或外网；权限由所选位置决定" TextWrapping="Wrap" Foreground="#667085" FontSize="12" Margin="4,12" />
-                    <Button Content="检查更新…" Click="CheckForUpdates" />
+                    <Border BorderBrush="#E5EAF1" BorderThickness="0,1,0,0" Padding="4,12,4,4">
+                        <StackPanel>
+                            <TextBlock Text="{Binding Updates.CurrentVersion, StringFormat=当前版本 {0}}" Foreground="#667085" FontSize="12" />
+                            <TextBlock Text="{Binding Updates.Status}" TextWrapping="Wrap" Foreground="#475467" FontSize="12" Margin="0,5,0,0" />
+                            <TextBlock Text="{Binding Updates.RelayStatus}" TextWrapping="Wrap" Foreground="#667085" FontSize="11" Margin="0,4,0,0" />
+                            <Button Content="{Binding Updates.InstallButtonText}" Click="InstallUpdate" Visibility="{Binding Updates.InstallButtonVisibility}"
+                                    IsEnabled="{Binding Updates.CanInstall}" Background="#DBEAFE" Foreground="#1D4ED8" Margin="0,8,0,0" />
+                            <Button Content="检查更新 / 重试" Click="CheckForUpdates" IsEnabled="{Binding Updates.CanCheck}" Margin="0,6,0,0" />
+                        </StackPanel>
+                    </Border>
                     <Button Content="配置中心" Click="OpenSettings" Background="#EFF6FF" Foreground="#1D4ED8" />
                 </StackPanel>
                 <StackPanel>

@@ -6,6 +6,7 @@
     <LangVersion>12</LangVersion>
   </PropertyGroup>
   <ItemGroup>
+    <EmbeddedResource Include="../../../Resources/update-public-key.pem" LogicalName="UpdateSigningPublicKey.pem" />
     <PackageReference Include="FluentFTP" Version="55.1.0" />
   </ItemGroup>
 </Project>

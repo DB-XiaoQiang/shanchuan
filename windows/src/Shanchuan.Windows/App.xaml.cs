@@ -43,7 +43,6 @@ public partial class App : System.Windows.Application
             return;
         }
 
-        var pendingUpdateError = AppUpdateService.TryApplyPendingAtStartup();
         var root = AppDataPaths.DefaultRoot;
         Directory.CreateDirectory(root);
         var settingsStore = new SettingsStore(root);
@@ -51,7 +50,6 @@ public partial class App : System.Windows.Application
         var logStore = new TransferLogStore(root);
         var credentials = new WindowsCredentialStore();
         var startupErrors = new List<string>();
-        if (pendingUpdateError is not null) startupErrors.Add(pendingUpdateError);
 
         var settings = Load("配置", () => settingsStore.Load(), new AppSettings(), startupErrors);
         var password = Load("FTP 密码", () => credentials.Read() ?? "", "", startupErrors);
@@ -60,6 +58,8 @@ public partial class App : System.Windows.Application
 
         _viewModel = new AppViewModel(settings, password, settingsStore, _historyStore, logStore,
             credentials, new FtpTransferService(), new FtpReceiveService(new ReceiveStateStore(root)), history, logs);
+        _viewModel.InitializeUpdates(root);
+        _viewModel.Updates.RestoreAuthorizedInstallAtStartup();
         _hotkeys = new GlobalHotkeyService();
         _hotkeys.CopyRequested += OnCopyRequested;
         _hotkeys.PasteRequested += OnPasteRequested;
@@ -73,6 +73,7 @@ public partial class App : System.Windows.Application
         _tray = new TrayIconService(ShowMainWindow, ExitApplication);
         _mainWindow.Show();
         _viewModel.Start();
+        _viewModel.Updates.Start();
 
         if (startupErrors.Count > 0)
             MessageBox.Show(string.Join("\n", startupErrors), "部分本机数据未能读取",
@@ -129,6 +130,7 @@ public partial class App : System.Windows.Application
             _viewModel.ReportActionError("上一次复制内容仍在捕获中，请稍候再按快捷键。");
             return;
         }
+        _viewModel.SetCopyCaptureInProgress(true);
         try
         {
             _viewModel.ReportCopyStarted();
@@ -142,7 +144,11 @@ public partial class App : System.Windows.Application
             }
         }
         catch (Exception error) { _viewModel.ReportActionError("复制捕获失败：" + error.Message); }
-        finally { Interlocked.Exchange(ref _copyInProgress, 0); }
+        finally
+        {
+            _viewModel.SetCopyCaptureInProgress(false);
+            Interlocked.Exchange(ref _copyInProgress, 0);
+        }
     }
 
     private async void OnPasteRequested(object? sender, ShortcutBinding binding)
