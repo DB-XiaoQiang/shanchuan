@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 已存在的版本标签（如 v0.3.0）
+        description: 已存在的版本标签（如 v0.1.1）
         required: true
         type: string
 permissions:
@@ -28,6 +28,7 @@ jobs:
           RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
         run: |
           python3 scripts/check-version.py "$RELEASE_TAG"
+          python3 scripts/release_policy.py --channel "$(cat RELEASE_CHANNEL)" --output "$RUNNER_TEMP/release-policy.json"
           echo "tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
   macos:
     needs: version
@@ -137,12 +138,17 @@ jobs:
           else
             printf '闪传 %s\n\n每日 01:00 检查更新，外网转发 Windows 更新至内网；左下角点击确认安装。\n' "$RELEASE_TAG" > "$notes"
           fi
-          ready=false
-          if [ "$MACOS_SIGNED" = true ] && [ -n "$UPDATE_MANIFEST_PRIVATE_KEY" ]; then
+          policy="$RUNNER_TEMP/release-policy.json"
+          python3 scripts/release_policy.py --channel "$(cat RELEASE_CHANNEL)" --output "$policy"
+          ready="$(python3 -c 'import json,sys;print(str(json.load(open(sys.argv[1]))["generate_manifest"]).lower())' "$policy")"
+          if [ "$ready" = true ]; then
             python3 scripts/release_manifest.py --directory release --notes-file "$notes"
-            ready=true
           else
-            printf '\n自动更新尚未上线：缺少正式签名公证或发行签名凭据。本版本保留为草稿，测试包不得作为正式更新源。\n' >> "$notes"
+            if [ "$(cat RELEASE_CHANNEL)" = prerelease ]; then
+              printf '\n本版本为公开预发布，仅供手动下载测试。正式自动更新保持关闭；未生成稳定更新清单。macOS 包尚未配置 Developer ID 签名公证，Windows 安装包尚无 Authenticode 签名。\n' >> "$notes"
+            else
+              printf '\n自动更新尚未上线：缺少正式签名公证或发行签名凭据。本版本保留为草稿，测试包不得作为正式更新源。\n' >> "$notes"
+            fi
           fi
           cd release
           find . -maxdepth 1 -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS
@@ -151,6 +157,7 @@ jobs:
             exit 1
           fi
           args=()
-          if [ "$ready" != true ]; then args+=(--draft); fi
+          mapfile -t args < <(python3 -c 'import json,sys;print("\n".join(json.load(open(sys.argv[1]))["arguments"]))' "$policy")
+          if [ "${args[0]:-}" = "" ]; then args=(); fi
           mapfile -d '' files < <(find . -maxdepth 1 -type f -print0 | sort -z)
           gh release create "$RELEASE_TAG" --verify-tag --title "闪传 $RELEASE_TAG" --notes-file "$notes" "${args[@]}" "${files[@]}"
