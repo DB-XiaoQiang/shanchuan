@@ -26,8 +26,8 @@ if [[ "$SIGNING_IDENTITY" == '-' ]]; then
     exit 1
 fi
 ./scripts/build-icons.sh
-swift build -c release
-BIN_DIR="$(swift build -c release --show-bin-path)"
+swift build -c release --arch arm64
+BIN_DIR="$(swift build -c release --arch arm64 --show-bin-path)"
 DIST="$PWD/dist"
 FINAL_APP="$DIST/闪传.app"
 FINAL_ZIP="$DIST/闪传-macos-arm64.zip"
@@ -83,18 +83,32 @@ if [[ ! -d "$FRAMEWORK" ]]; then
 fi
 [[ -d "$FRAMEWORK" ]] || { print -u2 '缺少 Sparkle.framework'; exit 1; }
 /usr/bin/ditto "$FRAMEWORK" "$APP/Contents/Frameworks/Sparkle.framework"
-# Sparkle's nested services keep their upstream signatures; sign the enclosing app.
+if [[ -n "${SHANCHUAN_UPDATE_FEED:-}" || -n "${SPARKLE_PUBLIC_KEY:-}" ]]; then
+    [[ -n "${SHANCHUAN_UPDATE_FEED:-}" && -n "${SPARKLE_PUBLIC_KEY:-}" && "$SHANCHUAN_UPDATE_FEED" == https://* ]] || {
+        print -u2 '自动更新需同时提供 HTTPS 更新源和 Sparkle 公钥。'; exit 1
+    }
+fi
 if [[ -n "${SHANCHUAN_UPDATE_FEED:-}" && -n "${SPARKLE_PUBLIC_KEY:-}" ]]; then
     /usr/libexec/PlistBuddy -c "Add :SUFeedURL string $SHANCHUAN_UPDATE_FEED" "$APP/Contents/Info.plist"
     /usr/libexec/PlistBuddy -c "Add :SUPublicEDKey string $SPARKLE_PUBLIC_KEY" "$APP/Contents/Info.plist"
     /usr/libexec/PlistBuddy -c 'Add :SUEnableAutomaticChecks bool true' "$APP/Contents/Info.plist"
 fi
 if [[ "$UNSIGNED_CI" != 1 ]]; then
+    # Re-sign nested code from the inside out, preserving Sparkle entitlements.
+    SPARKLE="$APP/Contents/Frameworks/Sparkle.framework/Versions/B"
+    for NESTED in "$SPARKLE/XPCServices/Downloader.xpc" "$SPARKLE/XPCServices/Installer.xpc" "$SPARKLE/Autoupdate" "$SPARKLE/Updater.app" "$APP/Contents/Frameworks/Sparkle.framework"; do
+        [[ -e "$NESTED" ]] || { print -u2 "Sparkle 签名目标缺失：$NESTED"; exit 1; }
+        codesign --force --sign "$SIGNING_IDENTITY" --preserve-metadata=identifier,entitlements --options runtime --timestamp "$NESTED"
+    done
     codesign --force --sign "$SIGNING_IDENTITY" --options runtime --timestamp "$APP"
     codesign --verify --deep --strict "$APP"
     if [[ -n "${NOTARY_KEYCHAIN_PROFILE:-}" ]]; then
         /usr/bin/ditto -c -k --keepParent "$APP" "$PACKAGE_WORK/notarize.zip"
-        xcrun notarytool submit "$PACKAGE_WORK/notarize.zip" --keychain-profile "$NOTARY_KEYCHAIN_PROFILE" --wait
+        NOTARY_ARGS=(--keychain-profile "$NOTARY_KEYCHAIN_PROFILE")
+        if [[ -n "${NOTARY_KEYCHAIN_PATH:-}" ]]; then
+            NOTARY_ARGS+=(--keychain "$NOTARY_KEYCHAIN_PATH")
+        fi
+        xcrun notarytool submit "$PACKAGE_WORK/notarize.zip" "${NOTARY_ARGS[@]}" --wait
         xcrun stapler staple "$APP"
         xcrun stapler validate "$APP"
     fi

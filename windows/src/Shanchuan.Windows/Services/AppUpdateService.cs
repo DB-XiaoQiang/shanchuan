@@ -8,8 +8,25 @@ namespace Shanchuan.Windows.Services;
 
 internal static class AppUpdateService
 {
+    private static bool _checking;
+
+    // The caller holds the application mutex: a second launch must never update
+    // or terminate the instance which may still be transferring files.
+    public static string? TryApplyPendingAtStartup()
+    {
+        try
+        {
+            var manager = new UpdateManager();
+            if (manager.IsInstalled && manager.UpdatePendingRestart is { } pending)
+                manager.ApplyUpdatesAndRestart(pending);
+            return null;
+        }
+        catch (Exception error) { return "已下载的更新未能安装：" + error.Message; }
+    }
+
     public static async Task CheckAsync(Window owner, bool silent = false)
     {
+        if (_checking) return;
         var repository = Assembly.GetExecutingAssembly().GetCustomAttributes<AssemblyMetadataAttribute>()
             .FirstOrDefault(x => x.Key == "UpdateRepository")?.Value;
         if (string.IsNullOrWhiteSpace(repository))
@@ -17,6 +34,7 @@ internal static class AppUpdateService
             if (!silent) MessageBox.Show(owner, "此构建尚未配置更新源，请从项目 Release 下载新版本。", "检查更新");
             return;
         }
+        _checking = true;
         try
         {
             var manager = new UpdateManager(new GithubSource(repository, null, false));
@@ -41,5 +59,6 @@ internal static class AppUpdateService
         {
             if (!silent) MessageBox.Show(owner, "检查或下载更新失败：" + error.Message + "\n私有仓库或无法访问 GitHub 的网络需要配置可访问的更新源。", "闪传更新");
         }
+        finally { _checking = false; }
     }
 }

@@ -25,5 +25,6 @@ IDENTITY="$(security find-identity -v -p codesigning "$KEYCHAIN" | awk '/"Develo
 [[ $(printf '%s\n' "$IDENTITY" | wc -l | tr -d ' ') = 1 && -n "$IDENTITY" ]] || { echo '需要唯一的 Developer ID Application 身份' >&2; exit 1; }
 xcrun notarytool store-credentials shanchuan-notary --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD" --keychain "$KEYCHAIN"
 echo "COPYTOOL_SIGNING_IDENTITY=$IDENTITY" >> "$GITHUB_ENV"
+echo "NOTARY_KEYCHAIN_PATH=$KEYCHAIN" >> "$GITHUB_ENV"
 echo 'NOTARY_KEYCHAIN_PROFILE=shanchuan-notary' >> "$GITHUB_ENV"
 echo 'signed=true' >> "$GITHUB_OUTPUT"

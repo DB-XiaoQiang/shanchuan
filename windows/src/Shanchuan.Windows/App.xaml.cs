@@ -25,7 +25,7 @@ public partial class App : System.Windows.Application
     [STAThread]
     public static void Main(string[] args)
     {
-        Velopack.VelopackApp.Build().Run();
+        Velopack.VelopackApp.Build().SetAutoApplyOnStartup(false).Run();
         var app = new App();
         app.InitializeComponent();
         app.Run();
@@ -43,6 +43,7 @@ public partial class App : System.Windows.Application
             return;
         }
 
+        var pendingUpdateError = AppUpdateService.TryApplyPendingAtStartup();
         var root = AppDataPaths.DefaultRoot;
         Directory.CreateDirectory(root);
         var settingsStore = new SettingsStore(root);
@@ -50,6 +51,7 @@ public partial class App : System.Windows.Application
         var logStore = new TransferLogStore(root);
         var credentials = new WindowsCredentialStore();
         var startupErrors = new List<string>();
+        if (pendingUpdateError is not null) startupErrors.Add(pendingUpdateError);
 
         var settings = Load("配置", () => settingsStore.Load(), new AppSettings(), startupErrors);
         var password = Load("FTP 密码", () => credentials.Read() ?? "", "", startupErrors);
