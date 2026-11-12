@@ -183,7 +183,6 @@ final class TransferLogIntegrationTests: XCTestCase {
     private func writePreferences(to root: URL, configured: Bool = false) throws {
         var preferences = AppPreferences()
         preferences.shortcuts.enabled = false
-        preferences.notificationsEnabled = false
         if configured {
             preferences.host = "synthetic.invalid"
             preferences.username = "synthetic-user"

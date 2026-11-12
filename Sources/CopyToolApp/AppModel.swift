@@ -1,6 +1,5 @@
 import AppKit
 import SwiftUI
-import UserNotifications
 import CopyToolCore
 import CryptoKit
 import Combine
@@ -39,6 +38,8 @@ import Combine
     private let readPassword: () -> String
     private let writePassword: (String) throws -> Void
     private var persistedPassword = ""
+    private var failureNoticePolicy = SendFailureNoticePolicy()
+    private let sendFailureNotice: (SendFailureNotice) -> Void
     private let worker = DispatchQueue(label: "local.copytool.upload")
     private let transfer = FTPTransfer()
     private var tasks: [(HistoryEntry, AppPreferences, String)] = []
@@ -65,7 +66,9 @@ import Combine
     }
 
     init(root: URL? = nil, readPassword: @escaping () -> String = PasswordVault.read,
-         writePassword: @escaping (String) throws -> Void = PasswordVault.write) {
+         writePassword: @escaping (String) throws -> Void = PasswordVault.write,
+         sendFailureNotice: ((SendFailureNotice) -> Void)? = nil) {
+        self.sendFailureNotice = sendFailureNotice ?? (root == nil ? { FailureNotifications.shared.send($0) } : { _ in })
         self.readPassword = readPassword
         self.writePassword = writePassword
         let base = root ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("CopyToolIndependent", isDirectory: true)
@@ -133,6 +136,7 @@ import Combine
         transferLogs = Array(transferLogs.prefix(logRepository.limit))
         updateLogText()
         saveTransferLogs()
+        if let notice = failureNoticePolicy.notice(for: safeText, level: level) { sendFailureNotice(notice) }
     }
     private func loadTransferLogs() {
         do {
@@ -392,7 +396,11 @@ import Combine
                             let sum = result.addingReportingOverflow(size)
                             return sum.overflow ? Int64.max : sum.partialValue
                         }
-                        self.log("准备完成：\(subject) · \(ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)) · 任务 \(attempt)")
+                        for folder in plan.groupedFileFolders {
+                            self.log("同名不同后缀文件已合并为文件夹：\(folder)；接收后在该文件夹内查看原文件 · 任务 \(attempt)")
+                        }
+                        let exclusions = plan.excludedItemCount > 0 ? " · 已排除 \(plan.excludedItemCount) 项（目录按 1 项计）" : ""
+                        self.log("准备完成：\(subject) · \(ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file))\(exclusions) · 任务 \(attempt)")
                     }
                 }
                 for (index, upload) in plan.files.enumerated() {
@@ -453,10 +461,6 @@ import Combine
         let result = cancelled ? "传输已取消" : (succeeded ? "FTP 上传完成" : "发送失败：\(error ?? "未知错误")")
         log("\(result) · \(transferSubject(entry)) · 任务 \(token.uuidString.prefix(8))",
             level: cancelled ? .cancelled : (succeeded ? .success : .error))
-        if succeeded && preferences.notificationsEnabled {
-            let content = UNMutableNotificationContent(); content.title = "闪传"; content.body = "同步完成"
-            UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil))
-        }
         beginNext()
     }
     func cancelAll() {
@@ -481,8 +485,5 @@ import Combine
         entries.removeAll(); selected = nil; persist()
         do { try repository.removeUnreferencedMedia(entries: []) } catch { log("清理图片失败") }
         log("已清空本应用历史；源文件保留")
-    }
-    func requestNotifications(_ enabled: Bool) {
-        if enabled { UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in } }
     }
 }

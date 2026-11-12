@@ -25,6 +25,23 @@ import CopyToolCore
                          "Command fallback must use the combined login-session source")
         }
         print("PASS copy and paste construct four ordered, marked events with complete Command release; not posted")
+        var releases = GlobalCopyPasteShortcuts.ReleaseTracker()
+        precondition(!releases.press(id: 1, target: nil))
+        precondition(releases.press(id: 1, target: 123))
+        precondition(!releases.press(id: 1, target: 456), "Held-key repeats must not replace the original target")
+        precondition(releases.release(id: 1) == 123)
+        precondition(releases.release(id: 1) == nil, "Carbon and local key-up must not dispatch twice")
+        precondition(releases.press(id: 1, target: 456))
+        releases.reset()
+        precondition(releases.release(id: 1) == nil, "Reconfiguration must cancel an unfinished press")
+        precondition(releases.press(id: 1, target: 789))
+        precondition(releases.release(id: 1) == 789, "A fresh shortcut must still work after reset")
+        print("PASS shortcut commits once on release, preserves initial target, ignores repeat and duplicate release, resets cleanly")
+        precondition(GlobalCopyPasteShortcuts.prefersKeyboardDispatch(bundleID: "com.jetbrains.intellij"))
+        precondition(GlobalCopyPasteShortcuts.prefersKeyboardDispatch(bundleID: "com.jetbrains.intellij.ce"))
+        precondition(!GlobalCopyPasteShortcuts.prefersKeyboardDispatch(bundleID: "com.apple.finder"))
+        precondition(!GlobalCopyPasteShortcuts.prefersKeyboardDispatch(bundleID: nil))
+        print("PASS IDEA editions bypass menu traversal while Finder retains AX menu dispatch")
         typealias Item = GlobalCopyPasteShortcuts.MenuItemMetadata
         func item(_ character: String? = nil, key: Int? = nil, modifiers: Int? = 0,
                   enabled: Bool = true, press: Bool = true) -> Item {
@@ -85,8 +102,8 @@ import CopyToolCore
         precondition(copyDecision(current: 101) == .ready,
                      "An acknowledged asynchronous copy may complete while its physical input fingerprint is unchanged")
         precondition(copyDecision(dispatched: false, current: 102) == .notDispatched,
-                     "An unacknowledged keyboard fallback must never authorize sending even if the clipboard changes")
-        print("PASS protected copy window permits acknowledged delayed writes but blocks new input, expiry and unacknowledged dispatch; no clipboard access")
+                     "An undispatched command must never authorize sending even if the clipboard changes")
+        print("PASS protected copy window permits dispatched delayed writes but blocks new input, expiry and absent dispatch; no clipboard access")
         var nextID: UInt32 = 100
         let modifiers = UInt32(controlKey | optionKey | shiftKey)
         func reserve(_ code: UInt32) -> (OSStatus, EventHotKeyRef?) {

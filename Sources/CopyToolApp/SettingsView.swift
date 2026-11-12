@@ -6,6 +6,7 @@ struct SettingsView: View {
     @ObservedObject var model: AppModel
     @StateObject private var autosave = SettingsAutosaveStore()
     @StateObject private var connectionTest = FTPConnectionTestStore()
+    @ObservedObject private var failureNotifications = FailureNotifications.shared
     @State private var migrationError = ""
     @State private var autostart = SMAppService.mainApp.status == .enabled
     @State private var autostartError = ""
@@ -51,18 +52,28 @@ struct SettingsView: View {
                     Toggle("按原协议路由加密标记文件", isOn: $autosave.draft.autoDecrypt)
                     TextField("解密目录前缀", text: $autosave.draft.decryptPrefix)
                 }
+                Section("目录排除规则") {
+                    DirectoryExclusionSettingsView(rules: $autosave.draft.directoryExclusionRules)
+                }
                 Section("本地行为") {
                     Stepper("历史保留：\(autosave.draft.ttlDays) 天", value: $autosave.draft.ttlDays, in: 1...3650)
                     Toggle("开启历史记录", isOn: $autosave.draft.historyEnabled)
                     Toggle("重发时恢复到本地剪贴板", isOn: $autosave.draft.restoreOnResend)
-                    Toggle("同步完成时通知", isOn: $autosave.draft.notificationsEnabled)
-
                     Toggle("登录后自动启动", isOn: $autostart).onChange(of: autostart) { enabled in
                         do { if enabled { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() }; autostartError = "" }
                         catch { autostartError = error.localizedDescription; autostart = SMAppService.mainApp.status == .enabled }
                     }
                 }
                 Section("传输提示") {
+                    Text("快捷键未发送或上传失败时显示系统通知，8 秒内合并重复提醒。")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Text(failureNotifications.status).font(.caption).foregroundStyle(.secondary)
+                    HStack {
+                        Button("允许通知 / 打开系统设置") { failureNotifications.enable() }
+                        Button("测试失败通知") {
+                            failureNotifications.send(SendFailureNotice(title: "闪传失败通知测试", body: "这是一条测试提醒，未上传任何数据。"))
+                        }
+                    }
                     Toggle("上传时显示右上角进度卡片", isOn: $autosave.draft.showTransferProgress)
                     Button("预览进度卡片") { model.previewTransferProgress?() }
                     Text("显示准备状态、上传百分比和已上传大小；关闭卡片不会取消上传。")
@@ -90,9 +101,7 @@ struct SettingsView: View {
                 (model?.preferences ?? AppPreferences(), model?.password ?? "")
             }, save: { [weak model] values, password in
                 guard let model else { return "设置尚未就绪" }
-                let shouldRequestNotifications = values.notificationsEnabled && !model.preferences.notificationsEnabled
                 guard model.saveSettings(preferences: values, password: password) else { return model.settingsError }
-                if shouldRequestNotifications { model.requestNotifications(true) }
                 return nil
             })
             windowAccess.willClose = { [weak autosave, weak connectionTest] in

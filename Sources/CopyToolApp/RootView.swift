@@ -45,6 +45,7 @@ struct RootView: View {
                 }
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: FailureNotifications.openLogs)) { _ in page = "logs" }
         .onDrop(of: [UTType.fileURL], isTargeted: $dropped) { providers in
             for provider in providers {
                 _ = provider.loadObject(ofClass: URL.self) { url, _ in if let url { Task { @MainActor in model.addFiles([url], automatic: false) } } }

@@ -21,13 +21,14 @@ final class ShortcutPreferencesTests: XCTestCase {
         expected.ttlDays = 14
         expected.syncEnabled = true
         expected.historyEnabled = false
-        expected.notificationsEnabled = true
         expected.restoreOnResend = true
         expected.textRemoteName = "synthetic.temp"
         expected.autoDecrypt = false
         expected.decryptPrefix = "/synthetic-decrypt/"
         XCTAssertEqual(decoded, expected)
         XCTAssertFalse(decoded.shortcuts.enabled)
+        let encoded = try JSONSerialization.jsonObject(with: JSONEncoder().encode(decoded)) as? [String: Any]
+        XCTAssertNil(encoded?["notificationsEnabled"], "Removed notification settings must not be written back")
     }
 
     func testMissingPreferencesUseDefaults() throws {

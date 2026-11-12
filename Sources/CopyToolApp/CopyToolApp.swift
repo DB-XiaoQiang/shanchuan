@@ -41,6 +41,7 @@ import AppKit
         transferPresenter?.stop()
     }
     func applicationDidFinishLaunching(_ notification: Notification) {
+        FailureNotifications.shared.configure()
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
     }

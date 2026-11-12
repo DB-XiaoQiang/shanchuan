@@ -6,7 +6,7 @@
 python3 Tests/ProtocolTransfer/mock_ftp.py
 ```
 
-脚本只监听 `127.0.0.1` 的随机端口，不读取任何应用配置、钥匙串或真实凭据，不访问原 FTP 服务器。它使用 Python 标准库实现最小 FTP 服务，单独编译 `KeyboardShortcutConfiguration.swift`、`History.swift`、`FTPTransfer.swift` 和 `TransferProtocol.swift`，再通过应用实际使用的 `/usr/bin/curl` 上传两个合成传输计划。快捷键配置源码为 `History.swift` 中的设置模型提供类型定义。需要本机 Swift 编译器、Python 3 和 macOS 自带的 `curl`、`ditto`。
+脚本只监听 `127.0.0.1` 的随机端口，不读取任何应用配置、钥匙串或真实凭据，不访问原 FTP 服务器。它使用 Python 标准库实现最小 FTP 服务，单独编译 `KeyboardShortcutConfiguration.swift`、`History.swift`、`DirectoryExclusions.swift`、`FTPTransfer.swift` 和 `TransferProtocol.swift`，再通过应用实际使用的 `/usr/bin/curl` 上传三个合成传输计划。快捷键配置源码为 `History.swift` 中的设置模型提供类型定义。需要本机 Swift 编译器、Python 3 和 macOS 自带的 `curl`、`ditto`。
 
 验证内容：
 
@@ -18,3 +18,5 @@ python3 Tests/ProtocolTransfer/mock_ftp.py
 成功时最后输出 `LOOPBACK_PROTOCOL_TRANSFER_PASS`。所有编译产物、合成源文件和协议暂存文件自动清理。
 
 本测试证明本机真实 FTP 传输路径与协议生成能协同工作；它不证明原内网接收端已接收或处理成功。
+
+- 同名不同后缀的 PDF/Markdown 文件使用一个独立文件夹实体发送，ZIP 内保留两个完整文件名和原字节，控制文件含 `folder:` 及 ZIP MD5，并在实体之后上传。

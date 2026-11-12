@@ -63,7 +63,7 @@ with socketserver.ThreadingTCPServer(('127.0.0.1', 0), FTP) as server, tempfile.
     threading.Thread(target=server.serve_forever, daemon=True).start()
     root = pathlib.Path(__file__).resolve().parents[2]
     executable = str(pathlib.Path(temp) / 'transfer-test')
-    subprocess.run(['swiftc', '-swift-version', '6', str(root/'Sources/CopyToolCore/FTPTransfer.swift'), str(root/'Sources/CopyToolCore/TransferProgress.swift'), str(root/'Tests/Transfer/main.swift'), '-o', executable], check=True)
+    subprocess.run(['swiftc', '-swift-version', '6', str(root/'Sources/CopyToolCore/FTPTransfer.swift'), str(root/'Sources/CopyToolCore/DirectoryExclusions.swift'), str(root/'Sources/CopyToolCore/TransferProgress.swift'), str(root/'Tests/Transfer/main.swift'), '-o', executable], check=True)
     subprocess.run([executable, str(server.server_address[1])], check=True, timeout=30)
     assert uploads['中文 file;type=A.txt'] == '本地 FTP 测试\n'.encode()
     assert uploads['progress.bin'] == b'A' * (16 * 1024 * 1024)
