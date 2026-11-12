@@ -4,16 +4,26 @@ import CopyToolCore
 
 struct SettingsView: View {
     @ObservedObject var model: AppModel
-    @StateObject private var autosave = SettingsAutosaveStore()
-    @StateObject private var connectionTest = FTPConnectionTestStore()
+    @ObservedObject private var autosave: SettingsAutosaveStore
+    @ObservedObject private var connectionTest: FTPConnectionTestStore
     @ObservedObject private var failureNotifications = FailureNotifications.shared
     @State private var migrationError = ""
     @State private var autostart = SMAppService.mainApp.status == .enabled
     @State private var autostartError = ""
-    @StateObject private var windowAccess = SettingsWindowAccess()
+    @ObservedObject private var windowAccess: SettingsWindowAccess
+    let session: SettingsPageSession
+
+    init(model: AppModel, session: SettingsPageSession) {
+        self.model = model
+        self.session = session
+        autosave = session.autosave
+        connectionTest = session.connectionTest
+        windowAccess = session.windowAccess
+    }
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("配置中心").font(.title2)
+            Text("修改后自动保存；配置未保存时会留在此页面，修正后再切换。")
+                .font(.caption).foregroundStyle(.secondary)
             Form {
                 Section("FTP 投递") {
                     HStack {
@@ -90,36 +100,28 @@ struct SettingsView: View {
                     migrationError = model.settingsError
                     if migrationError.isEmpty { autosave.reload() }
                 }
-                Text("FTP 连接仅在测试或发送时发起").font(.caption).foregroundStyle(.secondary)
+                Button("撤销未保存修改") { autosave.reload(); migrationError = "" }
+                    .disabled(!canDiscardChanges)
+                Text("测试连接不上传文件").font(.caption).foregroundStyle(.secondary)
                 Spacer()
                 Text(autosave.status.text).font(.caption)
                     .foregroundStyle(statusColor)
             }
         }
-        .onAppear { [model, autosave, connectionTest, windowAccess] in
-            autosave.connect(current: { [weak model] in
-                (model?.preferences ?? AppPreferences(), model?.password ?? "")
-            }, save: { [weak model] values, password in
-                guard let model else { return "设置尚未就绪" }
-                guard model.saveSettings(preferences: values, password: password) else { return model.settingsError }
-                return nil
-            })
-            windowAccess.willClose = { [weak autosave, weak connectionTest] in
-                autosave?.flush()
-                connectionTest?.cancel()
-            }
-            model.flushSettings = { [weak windowAccess, weak autosave, weak connectionTest] in
-                windowAccess?.window?.makeFirstResponder(nil)
-                autosave?.flush()
-                connectionTest?.cancel()
-            }
-        }
+        .onAppear { session.connect(model: model) }
         .onChange(of: autosave.draft) { _ in migrationError = ""; autosave.schedule() }
         .onChange(of: autosave.secret) { _ in migrationError = ""; autosave.schedule() }
         .onChange(of: autosave.portText) { _ in migrationError = ""; autosave.schedule() }
         .onChange(of: connectionInput) { input in connectionTest.inputChanged(input) }
         .onDisappear { windowAccess.flushBeforeClose() }
         .background(SettingsWindowReader(access: windowAccess).frame(width: 0, height: 0))
+    }
+
+    private var canDiscardChanges: Bool {
+        switch autosave.status {
+        case .pending, .failed: return true
+        case .ready, .saved: return false
+        }
     }
 
     private var statusColor: Color {

@@ -175,7 +175,12 @@ public partial class App : System.Windows.Application
 
     private void ExitApplication()
     {
-        _viewModel?.SaveSettingsNow();
+        if (_mainWindow is not null && !_mainWindow.TrySaveSettingsBeforeClose())
+        {
+            ShowMainWindow();
+            return;
+        }
+        if (_mainWindow is null && _viewModel?.SaveSettingsNow() == false) return;
         if (_mainWindow is not null)
         {
             _mainWindow.AllowClose = true;

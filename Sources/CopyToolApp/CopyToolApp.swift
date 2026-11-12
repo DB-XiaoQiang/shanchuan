@@ -6,11 +6,16 @@ import AppKit
     @StateObject private var model = AppModel()
     @StateObject private var updater = AppUpdater()
     @StateObject private var updates = UpdateCoordinator()
+    @StateObject private var navigation = AppNavigation()
+    @StateObject private var settings = SettingsPageSession()
     var body: some Scene {
         Window("闪传", id: "main") {
-            RootView(model: model, updates: updates).frame(minWidth: 820, minHeight: 560)
+            RootView(model: model, updates: updates, navigation: navigation, settings: settings).frame(minWidth: 820, minHeight: 560)
                 .onAppear {
                     delegate.connectTransferProgress(model)
+                    delegate.navigation = navigation
+                    settings.connect(model: model)
+                    navigation.prepareToLeaveSettings = { [weak pageSession = settings] in pageSession?.prepareToLeave() ?? true }
                     updates.businessIsBusy = { model.transferSnapshot.isActive || model.queued > 0 }
                     updates.ftpSettings = {
                         guard model.preferences.validationError == nil else { return nil }
@@ -27,6 +32,7 @@ import AppKit
                 }
         }.defaultSize(width: 1000, height: 720)
         .commands {
+            AppNavigationCommands(navigation: navigation)
             CommandGroup(after: .appInfo) {
                 Button("检查更新…") { updates.check() }
                     .disabled(!updates.canCheck)
@@ -36,9 +42,8 @@ import AppKit
                 Button("恢复选中记录") { if let item = model.selectedEntry { model.restore(item) } }.keyboardShortcut("r")
             }
         }
-        Settings { SettingsView(model: model).frame(width: 550).padding(24) }
         MenuBarExtra {
-            MenuContents(model: model)
+            MenuContents(model: model, navigation: navigation)
         } label: {
             if model.transferSnapshot.isActive {
                 Label(model.transferMenuTitle, systemImage: "arrow.up.circle.fill")
@@ -49,6 +54,7 @@ import AppKit
 @MainActor final class AppDelegate: NSObject, NSApplicationDelegate {
     private var transferPresenter: TransferProgressWindowController?
     private weak var model: AppModel?
+    weak var navigation: AppNavigation?
     func connectTransferProgress(_ model: AppModel) {
         guard transferPresenter == nil else { return }
         self.model = model
@@ -56,6 +62,15 @@ import AppKit
         transferPresenter = presenter
         model.previewTransferProgress = { [weak presenter] in presenter?.preview() }
         model.showTransferProgressCard = { [weak presenter] in presenter?.showCurrent() }
+    }
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard navigation?.prepareToLeaveCurrentPage() ?? true else {
+            navigation?.showMainWindow?()
+            sender.windows.first(where: { $0.canBecomeMain })?.makeKeyAndOrderFront(nil)
+            sender.activate(ignoringOtherApps: true)
+            return .terminateCancel
+        }
+        return .terminateNow
     }
     func applicationWillTerminate(_ notification: Notification) {
         model?.flushSettings?()
@@ -73,9 +88,15 @@ import AppKit
 }
 struct MenuContents: View {
     @ObservedObject var model: AppModel
+    @ObservedObject var navigation: AppNavigation
     @Environment(\.openWindow) private var openWindow
     var body: some View {
         Button("显示窗口") { openWindow(id: "main"); NSApp.activate(ignoringOtherApps: true) }
+        Button("配置中心") {
+            navigation.select(.settings)
+            openWindow(id: "main")
+            NSApp.activate(ignoringOtherApps: true)
+        }
         Button("复制并发送前台内容") { model.copyInFrontmostApplication() }
         Button("粘贴到前台应用") { model.pasteInFrontmostApplication() }
         Divider()

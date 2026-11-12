@@ -1,0 +1,43 @@
+name: Windows 页面与原生升级验收
+on:
+  workflow_dispatch:
+    inputs:
+      base_version:
+        description: 隔离旧版测试构建版本（必须低于 VERSION）
+        default: '0.1.1'
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  acceptance:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: 配置中心页面实际加载与保存验证
+        shell: pwsh
+        run: |
+          dotnet run --project windows/tests/Shanchuan.SettingsSmoke/Shanchuan.SettingsSmoke.csproj -c Release -- "$env:RUNNER_TEMP/settings-smoke"
+          if ($LASTEXITCODE -ne 0) { throw '页面验收失败。' }
+      - name: 隔离安装、更新及重启验收
+        shell: pwsh
+        env:
+          BASE_VERSION: ${{ inputs.base_version }}
+        run: |
+          $TargetVersion = (Get-Content VERSION -Raw).Trim()
+          ./windows/scripts/test-native-update.ps1 -BaseVersion "$env:BASE_VERSION" -TargetVersion $TargetVersion
+      - name: 保存验收结果
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-acceptance
+          path: |
+            ${{ runner.temp }}/settings-smoke/*.json
+            ${{ runner.temp }}/settings-smoke/*.png
+            ${{ runner.temp }}/native-update-smoke/report.json
+            ${{ runner.temp }}/native-update-smoke/*.log
+          if-no-files-found: warn

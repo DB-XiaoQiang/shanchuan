@@ -6,15 +6,18 @@ import CopyToolCore
 struct RootView: View {
     @ObservedObject var model: AppModel
     @ObservedObject var updates: UpdateCoordinator
-    @State private var page = "history"
+    @ObservedObject var navigation: AppNavigation
+    @ObservedObject var settings: SettingsPageSession
+    @Environment(\.openWindow) private var openWindow
     @State private var showClear = false
     @State private var dropped = false
     var body: some View {
         NavigationSplitView {
-            List(selection: $page) {
-                Label("剪贴板记录", systemImage: "doc.on.clipboard").tag("history")
-                Label("传输日志", systemImage: "arrow.up.arrow.down").tag("logs")
-                Label("使用说明", systemImage: "info.circle").tag("about")
+            List(selection: Binding(get: { navigation.page }, set: { navigation.select($0) })) {
+                Label("剪贴板记录", systemImage: "doc.on.clipboard").tag(AppNavigation.Page.history)
+                Label("传输日志", systemImage: "arrow.up.arrow.down").tag(AppNavigation.Page.logs)
+                Label("配置中心", systemImage: "gearshape").tag(AppNavigation.Page.settings)
+                Label("使用说明", systemImage: "info.circle").tag(AppNavigation.Page.about)
             }.navigationSplitViewColumnWidth(min: 150, ideal: 175)
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 6) {
@@ -22,8 +25,6 @@ struct RootView: View {
                     Text("闪传").font(.headline)
                 }
                 Text("本机历史 · 快捷键投递").font(.caption).foregroundStyle(.secondary)
-                if #available(macOS 14.0, *) { SettingsLink { Text("配置中心…") } }
-                else { Button("配置中心…") { NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil) } }
                 Divider()
                 Text("版本 " + updates.displayedVersion).font(.caption).foregroundStyle(.secondary)
                 Text(updates.status).font(.caption).textSelection(.enabled)
@@ -39,9 +40,12 @@ struct RootView: View {
             }.padding()
         } detail: {
             VStack(spacing: 0) {
-                if page == "history" { history }
-                else if page == "logs" { TransferLogsView(model: model) }
-                else { about }
+                switch navigation.page {
+                case .history: history
+                case .logs: TransferLogsView(model: model)
+                case .settings: SettingsView(model: model, session: settings).padding(20).accessibilityIdentifier("settings-page")
+                case .about: about
+                }
                 Divider()
                 HStack {
                     Circle().fill(model.preferences.host.isEmpty ? Color.orange : Color.green).frame(width: 7, height: 7)
@@ -50,22 +54,29 @@ struct RootView: View {
                     Text("\(model.entries.count) 条记录").font(.caption).foregroundStyle(.secondary)
                 }.padding(10)
             }
-            .navigationTitle("闪传")
+            .navigationTitle(navigation.page.title)
             .toolbar {
                 ToolbarItemGroup {
-                    Label("仅快捷键发送", systemImage: "keyboard").help("\(model.preferences.shortcuts.copy.displayName) 复制、记录并发送；Command+C 不记录、不上传")
-                    Button { model.chooseFiles() } label: { Label("添加文件", systemImage: "plus") }
+                    if navigation.page == .history {
+                        Label("仅快捷键发送", systemImage: "keyboard").help("\(model.preferences.shortcuts.copy.displayName) 复制、记录并发送；Command+C 不记录、不上传")
+                        Button { model.chooseFiles() } label: { Label("添加文件", systemImage: "plus") }
+                    }
                 }
             }
         }
-        .onReceive(NotificationCenter.default.publisher(for: FailureNotifications.openLogs)) { _ in page = "logs" }
+        .onAppear {
+            let open = openWindow
+            navigation.showMainWindow = { open(id: "main") }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: FailureNotifications.openLogs)) { _ in navigation.select(.logs) }
         .onDrop(of: [UTType.fileURL], isTargeted: $dropped) { providers in
+            guard navigation.acceptsFileDrop else { return false }
             for provider in providers {
                 _ = provider.loadObject(ofClass: URL.self) { url, _ in if let url { Task { @MainActor in model.addFiles([url], automatic: false) } } }
             }
             return !providers.isEmpty
         }
-        .overlay { if dropped { RoundedRectangle(cornerRadius: 12).stroke(Color.accentColor, lineWidth: 4).padding(8).allowsHitTesting(false) } }
+        .overlay { if dropped && navigation.acceptsFileDrop { RoundedRectangle(cornerRadius: 12).stroke(Color.accentColor, lineWidth: 4).padding(8).allowsHitTesting(false) } }
         .alert("清空本应用所有历史？", isPresented: $showClear) {
             Button("取消", role: .cancel) {}
             Button("清空记录", role: .destructive) { model.clearHistory() }

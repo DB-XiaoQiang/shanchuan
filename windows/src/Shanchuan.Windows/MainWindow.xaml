@@ -31,11 +31,11 @@
                             <Button Content="检查更新 / 重试" Click="CheckForUpdates" IsEnabled="{Binding Updates.CanCheck}" Margin="0,6,0,0" />
                         </StackPanel>
                     </Border>
-                    <Button Content="配置中心" Click="OpenSettings" Background="#EFF6FF" Foreground="#1D4ED8" />
                 </StackPanel>
                 <StackPanel>
-                    <Button Content="剪贴板记录" Click="NavigateHistory" HorizontalContentAlignment="Left" Background="Transparent" BorderThickness="0" FontSize="15" />
+                    <Button Content="剪贴板记录" AutomationProperties.AutomationId="HistoryNav" Click="NavigateHistory" HorizontalContentAlignment="Left" Background="Transparent" BorderThickness="0" FontSize="15" />
                     <Button Content="传输日志" Click="NavigateLogs" HorizontalContentAlignment="Left" Background="Transparent" BorderThickness="0" FontSize="15" />
+                    <Button Content="配置中心" AutomationProperties.AutomationId="SettingsNav" Click="NavigateSettings" HorizontalContentAlignment="Left" Background="Transparent" BorderThickness="0" FontSize="15" />
                     <Button Content="使用说明" Click="NavigateHelp" HorizontalContentAlignment="Left" Background="Transparent" BorderThickness="0" FontSize="15" />
                 </StackPanel>
             </DockPanel>
@@ -115,6 +115,8 @@
                         </DataGrid.Columns>
                     </DataGrid>
                 </Grid>
+
+                <ContentControl x:Name="SettingsPanel" Visibility="Collapsed" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" />
 
                 <Grid x:Name="LogsPanel" Visibility="Collapsed">
                     <Grid.RowDefinitions>

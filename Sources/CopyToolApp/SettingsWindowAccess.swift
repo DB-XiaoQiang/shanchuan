@@ -1,7 +1,7 @@
 import AppKit
 import SwiftUI
 
-/// 只保存当前设置视图所属窗口的弱引用，避免误关主窗口或进度卡片。
+/// 只保存配置页面所属主窗口的弱引用；用于结束编辑和关窗前提交，不创建额外窗口。
 @MainActor final class SettingsWindowAccess: ObservableObject {
     weak var window: NSWindow?
     var willClose: (() -> Void)?

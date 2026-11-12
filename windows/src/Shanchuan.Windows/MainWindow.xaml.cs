@@ -14,6 +14,7 @@ namespace Shanchuan.Windows;
 public partial class MainWindow : Window
 {
     private readonly AppViewModel _viewModel;
+    private SettingsPage? _settingsPage;
 
     public MainWindow(AppViewModel viewModel)
     {
@@ -30,12 +31,18 @@ public partial class MainWindow : Window
     private void NavigateHistory(object sender, RoutedEventArgs e) => ShowPage(HistoryPanel, "剪贴板记录");
     private void NavigateLogs(object sender, RoutedEventArgs e) => ShowPage(LogsPanel, "传输日志");
     private void NavigateHelp(object sender, RoutedEventArgs e) => ShowPage(HelpPanel, "使用说明");
+    private void NavigateSettings(object sender, RoutedEventArgs e) => ShowPage(SettingsPanel, "配置中心");
 
     private void ShowPage(FrameworkElement selected, string title)
     {
+        if (SettingsPanel.Visibility == Visibility.Visible && selected != SettingsPanel &&
+            _settingsPage is not null && !_settingsPage.TrySave()) return;
+        if (selected == SettingsPanel && _settingsPage is null)
+            SettingsPanel.Content = _settingsPage = new SettingsPage(_viewModel);
         HistoryPanel.Visibility = Visibility.Collapsed;
         LogsPanel.Visibility = Visibility.Collapsed;
         HelpPanel.Visibility = Visibility.Collapsed;
+        SettingsPanel.Visibility = Visibility.Collapsed;
         selected.Visibility = Visibility.Visible;
         PageTitle.Text = title;
     }
@@ -64,14 +71,16 @@ public partial class MainWindow : Window
 
     private void OnDragOver(object sender, DragEventArgs e)
     {
-        e.Effects = _viewModel.CanSend && e.Data.GetDataPresent(DataFormats.FileDrop)
+        e.Effects = HistoryPanel.Visibility == Visibility.Visible && _viewModel.CanSend && e.Data.GetDataPresent(DataFormats.FileDrop)
             ? DragDropEffects.Copy : DragDropEffects.None;
         e.Handled = true;
     }
 
     private void OnDrop(object sender, DragEventArgs e)
     {
-        if (e.Data.GetData(DataFormats.FileDrop) is string[] paths) _viewModel.EnqueuePaths(paths);
+        if (HistoryPanel.Visibility == Visibility.Visible && _viewModel.CanSend &&
+            e.Data.GetData(DataFormats.FileDrop) is string[] paths) _viewModel.EnqueuePaths(paths);
+        e.Handled = true;
     }
 
     private void ClearHistory(object sender, RoutedEventArgs e)
@@ -101,10 +110,15 @@ public partial class MainWindow : Window
 
     private async void InstallUpdate(object sender, RoutedEventArgs e) => await _viewModel.Updates.RequestInstallAsync(this);
 
-    private void OpenSettings(object sender, RoutedEventArgs e)
+    public bool TrySaveSettingsBeforeClose()
     {
-        var settings = new SettingsWindow(_viewModel) { Owner = this };
-        settings.ShowDialog();
+        var saved = _settingsPage?.TrySave() ?? _viewModel.SaveSettingsNow();
+        if (!saved)
+        {
+            ShowPage(SettingsPanel, "配置中心");
+            _settingsPage?.TrySave();
+        }
+        return saved;
     }
 
     private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
@@ -124,6 +138,6 @@ public partial class MainWindow : Window
     {
         if (AllowClose) return;
         e.Cancel = true;
-        Hide();
+        if (TrySaveSettingsBeforeClose()) Hide();
     }
 }
