@@ -34,7 +34,9 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: Shanchuan-macos-arm64-unsigned
-          path: dist/*.zip
+          path: |
+            dist/*.zip
+            dist/*.dmg
           if-no-files-found: error
   windows:
     runs-on: windows-latest

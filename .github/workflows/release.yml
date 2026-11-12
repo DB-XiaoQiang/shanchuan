@@ -77,6 +77,7 @@ jobs:
           name: release-macos
           path: |
             dist/*.zip
+            dist/*.dmg
             dist/appcast.xml
           if-no-files-found: error
       - name: 清理临时钥匙串
@@ -132,7 +133,7 @@ jobs:
           if [ "$MACOS_SIGNED" = true ]; then
             printf '双端构建与测试已通过。macOS 已签名并公证。\nWindows 安装包尚未配置 Authenticode 签名。\n' > "$RUNNER_TEMP/notes.md"
           else
-            printf '双端构建与测试已通过。\nmacOS 缺少 Developer ID 签名和公证，本版本保留为草稿；其中 macOS ZIP 仅供开发测试。\nWindows 安装包尚未配置 Authenticode 签名。\n' > "$RUNNER_TEMP/notes.md"
+            printf '双端构建与测试已通过。\nmacOS 缺少 Developer ID 签名和公证，本版本保留为草稿；其中 macOS 安装包仅供开发测试。\nWindows 安装包尚未配置 Authenticode 签名。\n' > "$RUNNER_TEMP/notes.md"
           fi
           if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
             echo '版本已存在，拒绝覆盖。请使用新版本标签。' >&2

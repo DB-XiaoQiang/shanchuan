@@ -31,7 +31,8 @@ BIN_DIR="$(swift build -c release --arch arm64 --show-bin-path)"
 DIST="$PWD/dist"
 FINAL_APP="$DIST/闪传.app"
 FINAL_ZIP="$DIST/Shanchuan-macos-arm64.zip"
-if [[ -L "$DIST" || -L "$FINAL_APP" || -L "$FINAL_ZIP" ]]; then
+FINAL_DMG="$DIST/Shanchuan-macos-arm64.dmg"
+if [[ -L "$DIST" || -L "$FINAL_APP" || -L "$FINAL_ZIP" || -L "$FINAL_DMG" ]]; then
     print -u2 '打包输出路径不能是符号链接；为避免覆盖其他位置，已停止。'
     exit 1
 fi
@@ -44,12 +45,30 @@ if [[ -e "$FINAL_APP" ]]; then
 fi
 /bin/mkdir -p "$DIST"
 PACKAGE_WORK="$(/usr/bin/mktemp -d "$DIST/.shanchuan-build.XXXXXX")"
+OUTPUT_NAMES=("闪传.app" "Shanchuan-macos-arm64.zip" "Shanchuan-macos-arm64.dmg")
+PUBLISH_STARTED=0
+PUBLISH_DONE=0
 cleanup_package() {
-    # 替换中断时恢复原输出；成功后仅清理本次临时文件。
-    if [[ ! -e "$FINAL_APP" && -e "$PACKAGE_WORK/previous.app" ]]; then
-        /bin/mv -- "$PACKAGE_WORK/previous.app" "$FINAL_APP"
+    local result=$?
+    local restore_failed=0
+    local output_name
+    # 失败时恢复整批输出；回滚失败则保留备份目录以便人工恢复。
+    if (( PUBLISH_STARTED && ! PUBLISH_DONE )); then
+        for output_name in "${OUTPUT_NAMES[@]}"; do
+            if [[ -e "$PACKAGE_WORK/previous/$output_name" ]]; then
+                /bin/rm -rf -- "$DIST/$output_name"
+                /bin/mv -- "$PACKAGE_WORK/previous/$output_name" "$DIST/$output_name" || restore_failed=1
+            elif [[ ! -e "$PACKAGE_WORK/$output_name" ]]; then
+                /bin/rm -rf -- "$DIST/$output_name"
+            fi
+        done
+    fi
+    if (( restore_failed )); then
+        print -u2 "输出回滚未完成，已保留备份：$PACKAGE_WORK"
+        return 1
     fi
     /bin/rm -rf -- "$PACKAGE_WORK"
+    return $result
 }
 trap cleanup_package EXIT
 APP="$PACKAGE_WORK/闪传.app"
@@ -114,9 +133,47 @@ if [[ "$UNSIGNED_CI" != 1 ]]; then
     fi
 fi
 /usr/bin/ditto -c -k --keepParent "$APP" "$PACKAGE_WORK/Shanchuan-macos-arm64.zip"
-if [[ -e "$FINAL_APP" ]]; then
-    /bin/mv -- "$FINAL_APP" "$PACKAGE_WORK/previous.app"
+
+# DMG 用于拖拽安装，ZIP 继续作为 Sparkle 更新包。
+DMG_ROOT="$PACKAGE_WORK/dmg-root"
+DMG_IMAGE="$PACKAGE_WORK/Shanchuan-macos-arm64.dmg"
+/bin/mkdir -p "$DMG_ROOT"
+/usr/bin/ditto "$APP" "$DMG_ROOT/闪传.app"
+/bin/ln -s /Applications "$DMG_ROOT/Applications"
+cat > "$DMG_ROOT/安装说明.txt" <<'INSTALL'
+闪传安装说明
+
+1. 将“闪传.app”拖到旁边的 Applications（应用程序）文件夹。
+2. 复制完成后推出此磁盘映像。
+3. 从“应用程序”打开闪传，并按提示授予快捷键所需的辅助功能权限。
+
+升级前请等待传输完成，并从闪传菜单选择“退出”，再替换应用。
+INSTALL
+/usr/bin/hdiutil create -volname "闪传 $VERSION" -srcfolder "$DMG_ROOT" \
+    -fs HFS+ -format UDZO -imagekey zlib-level=9 "$DMG_IMAGE"
+VERIFY_ARGS=()
+if [[ "$UNSIGNED_CI" != 1 ]]; then
+    codesign --sign "$SIGNING_IDENTITY" --timestamp "$DMG_IMAGE"
+    codesign --verify --strict "$DMG_IMAGE"
+    VERIFY_ARGS+=(--signed)
+    if [[ -n "${NOTARY_KEYCHAIN_PROFILE:-}" ]]; then
+        xcrun notarytool submit "$DMG_IMAGE" "${NOTARY_ARGS[@]}" --wait
+        xcrun stapler staple "$DMG_IMAGE"
+        xcrun stapler validate "$DMG_IMAGE"
+    fi
 fi
-/bin/mv -- "$APP" "$FINAL_APP"
-/bin/mv -f -- "$PACKAGE_WORK/Shanchuan-macos-arm64.zip" "$FINAL_ZIP"
-print -r -- "$FINAL_APP"
+python3 scripts/verify-dmg.py "$DMG_IMAGE" "${VERIFY_ARGS[@]}"
+
+# 所有产物创建和验证成功后才替换输出，避免暴露未完成的镜像。
+/bin/mkdir -p "$PACKAGE_WORK/previous"
+PUBLISH_STARTED=1
+for OUTPUT_NAME in "${OUTPUT_NAMES[@]}"; do
+    if [[ -e "$DIST/$OUTPUT_NAME" ]]; then
+        /bin/mv -- "$DIST/$OUTPUT_NAME" "$PACKAGE_WORK/previous/$OUTPUT_NAME"
+    fi
+done
+for OUTPUT_NAME in "${OUTPUT_NAMES[@]}"; do
+    /bin/mv -- "$PACKAGE_WORK/$OUTPUT_NAME" "$DIST/$OUTPUT_NAME"
+done
+PUBLISH_DONE=1
+print -r -- "$FINAL_APP" "$FINAL_ZIP" "$FINAL_DMG"

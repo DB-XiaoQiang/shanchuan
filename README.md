@@ -19,7 +19,7 @@ python3 Tests/FTPConnection/mock_ftp.py
 ./scripts/package.sh
 ```
 
-打包结果位于 `dist/闪传.app` 和 `dist/Shanchuan-macos-arm64.zip`。打包需要稳定的 Apple Development 签名身份，以保留 macOS 辅助功能和钥匙串授权。身份无法唯一确定时，可通过 `COPYTOOL_SIGNING_IDENTITY` 指定证书 SHA-1；脚本在签名失败时停止，不回退到 ad hoc 签名。
+打包结果位于 `dist/闪传.app`、`dist/Shanchuan-macos-arm64.dmg` 和 `dist/Shanchuan-macos-arm64.zip`。DMG 用于安装：双击打开后，将“闪传.app”拖到旁边的 Applications（应用程序），复制完成后推出镜像。升级前先等待传输结束并退出闪传。ZIP 继续用于应用更新。打包需要稳定的 Apple Development 签名身份，以保留 macOS 辅助功能和钥匙串授权。身份无法唯一确定时，可通过 `COPYTOOL_SIGNING_IDENTITY` 指定证书 SHA-1；脚本在签名失败时停止，不回退到 ad hoc 签名。
 
 ## 功能
 
