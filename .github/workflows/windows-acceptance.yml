@@ -41,3 +41,29 @@ jobs:
             ${{ runner.temp }}/native-update-smoke/report.json
             ${{ runner.temp }}/native-update-smoke/*.log
           if-no-files-found: warn
+  gui-update:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: 原始发布版 GUI 的签名更新与页面验收
+        shell: pwsh
+        env:
+          BASE_VERSION: ${{ inputs.base_version }}
+          UPDATE_MANIFEST_PRIVATE_KEY: ${{ secrets.UPDATE_MANIFEST_PRIVATE_KEY }}
+        run: |
+          $TargetVersion = (Get-Content VERSION -Raw).Trim()
+          ./windows/scripts/test-gui-update.ps1 -BaseVersion "$env:BASE_VERSION" -TargetVersion $TargetVersion
+      - name: 保存真实程序验收结果
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-gui-update-acceptance
+          path: |
+            ${{ runner.temp }}/gui-update-smoke/*.json
+            ${{ runner.temp }}/gui-update-smoke/*.png
+            ${{ runner.temp }}/gui-update-smoke/*.log
+          if-no-files-found: warn
