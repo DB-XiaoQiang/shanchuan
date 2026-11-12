@@ -1,8 +1,12 @@
 # 闪传
 
-闪传是一个面向 macOS 的剪贴板历史与 FTP 投递应用。它提供全局自定义复制发送快捷键、显式文件／文件夹投递、传输进度与本地操作日志。
+闪传是面向 macOS 和 Windows 的剪贴板历史与 FTP 投递应用。它提供全局自定义复制发送快捷键、显式文件／文件夹投递、传输进度与本地操作日志。普通系统复制不进入闪传记录，也不上传。
 
-## 构建
+## Windows 版
+
+Windows 10/11 版本位于 `windows/`，采用 C#/.NET 8 + WPF。核心协议、目录排除和进度统计与界面分离，并提供单元测试、发布脚本和 GitHub Actions 工作流。构建、使用与数据位置详见 `windows/README.md`。
+
+## macOS 构建
 
 要求 macOS 13 或更新版本、Apple Silicon，以及 Swift 5.9+（Xcode Command Line Tools）。项目不依赖第三方 Swift 包。
 

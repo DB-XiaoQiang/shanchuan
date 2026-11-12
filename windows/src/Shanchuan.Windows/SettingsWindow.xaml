@@ -1,0 +1,126 @@
+<Window x:Class="Shanchuan.Windows.SettingsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="闪传 · 配置中心" Width="700" Height="790" MinWidth="620" MinHeight="650"
+        Icon="Assets/app.ico" Background="#F6F8FC" WindowStartupLocation="CenterOwner">
+    <DockPanel Margin="24,18,24,16">
+        <StackPanel DockPanel.Dock="Top" Margin="0,0,0,16">
+            <TextBlock Text="配置中心" FontSize="26" FontWeight="SemiBold" />
+            <TextBlock Text="修改即自动保存，无需点击保存按钮" Foreground="#667085" Margin="0,5,0,0" />
+        </StackPanel>
+        <Border DockPanel.Dock="Bottom" Background="#FFFFFF" CornerRadius="8" Padding="12" Margin="0,14,0,0" BorderBrush="#E5EAF1" BorderThickness="1">
+            <TextBlock Text="{Binding SettingsStatus}" TextWrapping="Wrap" Foreground="#475467" />
+        </Border>
+        <ScrollViewer VerticalScrollBarVisibility="Auto">
+            <StackPanel>
+                <Border Background="#EFF6FF" BorderBrush="#BFDBFE" BorderThickness="1" CornerRadius="10" Padding="20" Margin="0,0,0,14">
+                    <StackPanel>
+                        <TextBlock Text="网络位置（必选）" FontSize="18" FontWeight="SemiBold" Foreground="#1E3A8A" />
+                        <TextBlock Text="由你明确选择，不根据 IP 地址自动猜测。切换位置会停止当前不符合权限的传输。" TextWrapping="Wrap" Foreground="#475467" Margin="0,5,0,10" />
+                        <ComboBox x:Name="NetworkModeSelector" SelectionChanged="NetworkModeChanged" HorizontalContentAlignment="Stretch">
+                            <ComboBoxItem Content="请选择网络位置（发送和接收均禁用）" />
+                            <ComboBoxItem Content="内网（只接收：允许 FTP 下载、删除；禁止上传）" />
+                            <ComboBoxItem Content="外网（只发送：允许 FTP 上传；禁止下载和删除）" />
+                        </ComboBox>
+                        <TextBlock Text="{Binding NetworkStatus}" FontWeight="SemiBold" Foreground="#1D4ED8" Margin="0,10,0,0" />
+                        <TextBlock Text="内网接收目录" Margin="0,12,0,0" />
+                        <Grid>
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                            <TextBox x:Name="ReceiveDirectoryBox" Text="{Binding Settings.ReceiveDirectory, UpdateSourceTrigger=PropertyChanged}" TextChanged="SettingChanged" />
+                            <Button Grid.Column="1" Content="浏览…" Click="BrowseReceiveDirectory" Margin="8,0,0,0" />
+                        </Grid>
+                        <TextBlock x:Name="DefaultReceivePath" TextWrapping="Wrap" Foreground="#667085" FontSize="12" Margin="0,4,0,0" />
+                        <TextBlock Text="检查间隔（秒，2–3600）" Margin="0,10,0,0" />
+                        <TextBox Text="{Binding Settings.ReceiveIntervalSeconds, UpdateSourceTrigger=PropertyChanged}" TextChanged="SettingChanged" Width="120" HorizontalAlignment="Left" />
+                        <TextBlock Text="{Binding ReceiveStatus}" TextWrapping="Wrap" Foreground="#475467" Margin="0,10,0,0" />
+                    </StackPanel>
+                </Border>
+
+                <Border Background="#FFFFFF" CornerRadius="10" Padding="20" Margin="0,0,0,14">
+                    <StackPanel>
+                        <TextBlock Text="FTP 投递与接收" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,12" />
+                        <Grid>
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="110" /></Grid.ColumnDefinitions>
+                            <StackPanel>
+                                <TextBlock Text="服务器地址" />
+                                <TextBox Text="{Binding Settings.Host, UpdateSourceTrigger=PropertyChanged}" TextChanged="SettingChanged" ToolTip="只填写主机名或 IP，不需要 ftp://" />
+                            </StackPanel>
+                            <StackPanel Grid.Column="1" Margin="12,0,0,0">
+                                <TextBlock Text="端口" />
+                                <TextBox Text="{Binding Settings.Port, UpdateSourceTrigger=PropertyChanged}" TextChanged="SettingChanged" />
+                            </StackPanel>
+                        </Grid>
+                        <Grid Margin="0,10,0,0">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                            <StackPanel>
+                                <TextBlock Text="用户名" />
+                                <TextBox Text="{Binding Settings.Username, UpdateSourceTrigger=PropertyChanged}" TextChanged="SettingChanged" />
+                            </StackPanel>
+                            <StackPanel Grid.Column="1" Margin="12,0,0,0">
+                                <TextBlock Text="密码（Windows 凭据管理器）" />
+                                <PasswordBox x:Name="PasswordBox" PasswordChanged="PasswordChanged" />
+                            </StackPanel>
+                        </Grid>
+                        <TextBlock Text="目标目录" Margin="0,10,0,0" />
+                        <TextBox Text="{Binding Settings.Directory, UpdateSourceTrigger=PropertyChanged}" TextChanged="SettingChanged" />
+                        <StackPanel Orientation="Horizontal" Margin="-4,10,0,0">
+                            <Button Content="测试连接" Click="TestConnection" Background="#2563EB" Foreground="White" />
+                            <TextBlock Text="只验证登录和目录访问，不上传文件" VerticalAlignment="Center" Foreground="#667085" Margin="8,0" />
+                        </StackPanel>
+                        <TextBlock Text="{Binding ConnectionTestStatus}" TextWrapping="Wrap" Foreground="#2563EB" Margin="0,4,0,0" />
+                        <Grid Margin="0,10,0,0">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="150" /></Grid.ColumnDefinitions>
+                            <StackPanel>
+                                <TextBlock Text="文本控制文件名" />
+                                <TextBox Text="{Binding Settings.TextRemoteName, UpdateSourceTrigger=PropertyChanged}" TextChanged="SettingChanged" />
+                            </StackPanel>
+                            <StackPanel Grid.Column="1" Margin="12,0,0,0">
+                                <TextBlock Text="历史保留天数" />
+                                <TextBox Text="{Binding Settings.TtlDays, UpdateSourceTrigger=PropertyChanged}" TextChanged="SettingChanged" />
+                            </StackPanel>
+                        </Grid>
+                        <CheckBox Content="检测到 Office 特殊标记时路由到解密目录（不执行解密）" IsChecked="{Binding Settings.AutoDecrypt}" Checked="SettingChanged" Unchecked="SettingChanged" Margin="0,14,0,4" />
+                        <TextBlock Text="解密路由前缀" />
+                        <TextBox Text="{Binding Settings.DecryptPrefix, UpdateSourceTrigger=PropertyChanged}" TextChanged="SettingChanged" />
+                    </StackPanel>
+                </Border>
+
+                <Border Background="#FFFFFF" CornerRadius="10" Padding="20" Margin="0,0,0,14">
+                    <StackPanel>
+                        <TextBlock Text="全局复制 / 粘贴快捷键" FontSize="18" FontWeight="SemiBold" />
+                        <TextBlock Text="{Binding HotkeyStatus}" TextWrapping="Wrap" Foreground="#475467" Margin="0,5,0,0" />
+                        <CheckBox Content="启用全局快捷键" IsChecked="{Binding Settings.Shortcuts.Enabled}" Checked="SettingChanged" Unchecked="SettingChanged" Margin="0,10,0,8" />
+                        <TextBlock Text="复制并发送（点击输入框后按下新组合键）" />
+                        <TextBox x:Name="CopyHotkey" IsReadOnly="True" PreviewKeyDown="RecordHotkey" Tag="Copy" Cursor="Hand" />
+                        <TextBlock Text="粘贴（不触发上传）" Margin="0,10,0,0" />
+                        <TextBox x:Name="PasteHotkey" IsReadOnly="True" PreviewKeyDown="RecordHotkey" Tag="Paste" Cursor="Hand" />
+                        <StackPanel Orientation="Horizontal" Margin="-4,8,0,0">
+                            <Button Content="恢复默认快捷键" Click="ResetHotkeys" />
+                            <TextBlock Text="Ctrl+C / Ctrl+V 保留给 Windows 原生操作" VerticalAlignment="Center" Foreground="#667085" Margin="10,0" />
+                        </StackPanel>
+                        <TextBlock x:Name="HotkeyError" Foreground="#B42318" TextWrapping="Wrap" />
+                    </StackPanel>
+                </Border>
+
+                <Border Background="#FFFFFF" CornerRadius="10" Padding="20" Margin="0,0,0,14">
+                    <StackPanel>
+                        <TextBlock Text="目录排除规则" FontSize="18" FontWeight="SemiBold" />
+                        <TextBlock Text="每行一条；末尾 / 只排除文件夹，支持 *、?、** 和相对路径。" TextWrapping="Wrap" Foreground="#667085" Margin="0,5,0,6" />
+                        <TextBox x:Name="ExclusionRules" Text="{Binding Settings.DirectoryExclusionRules, UpdateSourceTrigger=PropertyChanged}" TextChanged="SettingChanged"
+                                 AcceptsReturn="True" AcceptsTab="True" Height="105" VerticalContentAlignment="Top" FontFamily="Consolas" />
+                        <Button Content="添加常用规则" Click="AddCommonRules" HorizontalAlignment="Left" Margin="0,6,0,0" />
+                    </StackPanel>
+                </Border>
+
+                <Border Background="#FFFFFF" CornerRadius="10" Padding="20">
+                    <StackPanel>
+                        <TextBlock Text="运行与提示" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,8" />
+                        <CheckBox Content="上传时显示屏幕右上角进度卡片" IsChecked="{Binding Settings.ShowTransferProgress}" Checked="SettingChanged" Unchecked="SettingChanged" Margin="0,5" />
+                        <CheckBox Content="重新发送历史记录时同时恢复到系统剪贴板" IsChecked="{Binding Settings.RestoreOnResend}" Checked="SettingChanged" Unchecked="SettingChanged" Margin="0,5" />
+                        <CheckBox Content="登录 Windows 后自动启动闪传" IsChecked="{Binding Settings.StartWithWindows}" Checked="SettingChanged" Unchecked="SettingChanged" Margin="0,5" />
+                    </StackPanel>
+                </Border>
+            </StackPanel>
+        </ScrollViewer>
+    </DockPanel>
+</Window>

@@ -1,0 +1,150 @@
+using Shanchuan.Core;
+
+namespace Shanchuan.Windows.ViewModels;
+
+public sealed partial class AppViewModel
+{
+    private readonly SemaphoreSlim _receiveSignal = new(0, 1);
+    private readonly object _receiveSync = new();
+    private NetworkMode _savedNetworkMode;
+    private string _receiveStatus = "";
+    private CancellationTokenSource? _receiveCycleCts;
+    private Task? _receiveWorker;
+
+    public string NetworkStatus => NetworkPolicy.DisplayName(Settings.NetworkMode);
+    public string ReceiveStatus { get => _receiveStatus; private set => SetProperty(ref _receiveStatus, value); }
+    public bool CanSend => Settings.NetworkMode == NetworkMode.External;
+
+    private static string IdleReceiveStatus(NetworkMode mode) => mode switch
+    {
+        NetworkMode.Internal => "内网 · 等待检查外网投递",
+        NetworkMode.External => "外网 · 接收已禁用，禁止下载和删除",
+        _ => "未设置 · 发送和接收均已禁用"
+    };
+
+    private void StartReceiver()
+    {
+        if (_receiveWorker is null) _receiveWorker = Task.Run(ReceiveLoopAsync);
+        SignalReceiver();
+    }
+
+    private void OnNetworkSettingsSaved()
+    {
+        var modeChanged = _savedNetworkMode != Settings.NetworkMode;
+        _savedNetworkMode = Settings.NetworkMode;
+        OnPropertyChanged(nameof(NetworkStatus));
+        OnPropertyChanged(nameof(CanSend));
+        if (modeChanged)
+        {
+            lock (_receiveSync) _receiveCycleCts?.Cancel();
+            if (Settings.NetworkMode != NetworkMode.External) CancelTransfers();
+        }
+        ReceiveStatus = IdleReceiveStatus(Settings.NetworkMode);
+        SignalReceiver();
+    }
+
+    private void SignalReceiver()
+    {
+        if (_receiveSignal.CurrentCount == 0) _receiveSignal.Release();
+    }
+
+    private async Task ReceiveLoopAsync()
+    {
+        while (!_lifetimeCts.IsCancellationRequested)
+        {
+            var settings = Settings.Clone();
+            if (settings.NetworkMode != NetworkMode.Internal)
+            {
+                OnUi(() => ReceiveStatus = IdleReceiveStatus(settings.NetworkMode));
+                try { await _receiveSignal.WaitAsync(_lifetimeCts.Token).ConfigureAwait(false); }
+                catch (OperationCanceledException) { return; }
+                continue;
+            }
+
+            using var current = CancellationTokenSource.CreateLinkedTokenSource(_lifetimeCts.Token);
+            lock (_receiveSync) _receiveCycleCts = current;
+            try
+            {
+                if (settings.ValidateForTransfer() is { } validationError)
+                {
+                    OnUi(() => ReceiveStatus = "内网 · 配置不完整：" + validationError);
+                }
+                else
+                {
+                    OnUi(() => ReceiveStatus = "内网 · 正在检查外网投递…");
+                    var result = await _receiver.ReceivePendingAsync(settings, _password, current.Token)
+                        .ConfigureAwait(false);
+                    OnUi(() => ApplyReceiveResult(result));
+                }
+            }
+            catch (OperationCanceledException) when (current.IsCancellationRequested)
+            {
+                if (!_lifetimeCts.IsCancellationRequested)
+                    OnUi(() => ReceiveStatus = IdleReceiveStatus(Settings.NetworkMode));
+            }
+            catch (Exception error)
+            {
+                var reason = Sanitize(error.Message);
+                OnUi(() =>
+                {
+                    ReceiveStatus = "内网 · 检查失败：" + reason;
+                    StatusMessage = "接收检查失败：" + reason;
+                    AddLog(TransferLogLevel.Error, "接收检查失败：" + reason);
+                });
+            }
+            finally
+            {
+                lock (_receiveSync)
+                {
+                    if (ReferenceEquals(_receiveCycleCts, current)) _receiveCycleCts = null;
+                }
+            }
+
+            if (_lifetimeCts.IsCancellationRequested) return;
+            try
+            {
+                await _receiveSignal.WaitAsync(TimeSpan.FromSeconds(Math.Clamp(settings.ReceiveIntervalSeconds, 2, 3600)),
+                    _lifetimeCts.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) { return; }
+        }
+    }
+
+    private void ApplyReceiveResult(ReceiveBatchResult result)
+    {
+        var clipboardFailed = false;
+        foreach (var entry in result.Received)
+        {
+            _history.Insert(0, entry);
+            AddLog(TransferLogLevel.Success, "接收成功：" + entry.Title);
+            try { ClipboardRestoreRequested?.Invoke(this, entry); }
+            catch (Exception error)
+            {
+                clipboardFailed = true;
+                AddLog(TransferLogLevel.Warning, "已接收并保存，但写入 Windows 剪贴板失败：" +
+                    entry.Title + "；" + Sanitize(error.Message));
+            }
+        }
+        if (result.Received.Count > 0)
+        {
+            RefreshHistory();
+            SaveHistoryAndMedia();
+            StatusMessage = clipboardFailed
+                ? $"已接收 {result.Received.Count} 项，但部分剪贴板写入失败；请查看传输日志。"
+                : $"已接收 {result.Received.Count} 项，内容已写入剪贴板。";
+        }
+
+        foreach (var failure in result.Failures)
+            AddLog(TransferLogLevel.Error, $"接收失败：{failure.ControlName}；{Sanitize(failure.Reason)}；远端数据已保留。");
+        foreach (var warning in result.Warnings)
+            AddLog(TransferLogLevel.Warning, Sanitize(warning));
+
+        var detail = result.Received.Count > 0 ? $"接收 {result.Received.Count} 项" :
+            result.DiscoveredCount > 0 ? "未发现新的待接收内容" : "暂无外网投递";
+        if (result.Failures.Count > 0) detail += $"，失败 {result.Failures.Count} 项";
+        if (result.Warnings.Count > 0) detail += $"，清理警告 {result.Warnings.Count} 条";
+        ReceiveStatus = $"内网 · 最近检查 {DateTime.Now:HH:mm:ss} · {detail}";
+        if (result.Failures.Count > 0 && result.Received.Count == 0)
+            StatusMessage = "接收失败，远端数据已保留；请查看传输日志。";
+    }
+}

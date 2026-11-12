@@ -1,0 +1,48 @@
+name: Windows 闪传
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "windows/**"
+      - ".github/workflows/windows.yml"
+  pull_request:
+    paths:
+      - "windows/**"
+      - ".github/workflows/windows.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build-test-publish:
+    runs-on: windows-latest
+    steps:
+      - name: 检出源码
+        uses: actions/checkout@v4
+
+      - name: 安装 .NET 8 SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: 还原依赖
+        run: dotnet restore windows/Shanchuan.sln
+
+      - name: 编译
+        run: dotnet build windows/Shanchuan.sln --configuration Release --no-restore
+
+      - name: 核心测试
+        run: dotnet test windows/tests/Shanchuan.Core.Tests/Shanchuan.Core.Tests.csproj --configuration Release --no-build
+
+      - name: 发布 Windows x64 单文件版本
+        shell: pwsh
+        run: ./windows/scripts/publish.ps1 -Runtime win-x64
+
+      - name: 上传发布包
+        uses: actions/upload-artifact@v4
+        with:
+          name: Shanchuan-windows-x64
+          path: windows/dist/Shanchuan-win-x64.zip
+          if-no-files-found: error
+          retention-days: 14

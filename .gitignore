@@ -6,3 +6,8 @@ evidence/
 # Local acceptance notes contain internal hosts, paths and screenshots.
 ACCEPTANCE-*.md
 VALIDATION.md
+
+# Windows build and publish outputs.
+windows/**/bin/
+windows/**/obj/
+windows/dist/

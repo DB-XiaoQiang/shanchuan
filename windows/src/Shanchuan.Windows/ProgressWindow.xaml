@@ -1,0 +1,37 @@
+<Window x:Class="Shanchuan.Windows.ProgressWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Width="380" SizeToContent="Height" MaxHeight="280" WindowStyle="None" AllowsTransparency="True"
+        Background="Transparent" Topmost="True" ShowInTaskbar="False" ShowActivated="False">
+    <Border Margin="8" Background="#FFFFFF" CornerRadius="14" BorderBrush="#DDE5F0" BorderThickness="1" Padding="18">
+        <Border.Effect>
+            <DropShadowEffect Color="#667085" BlurRadius="24" ShadowDepth="3" Opacity="0.24" />
+        </Border.Effect>
+        <StackPanel>
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <Border Width="38" Height="38" CornerRadius="10" Background="#EFF6FF">
+                    <Image Source="Assets/app.png" Width="30" Height="30" />
+                </Border>
+                <StackPanel Grid.Column="1" Margin="12,0,8,0">
+                    <TextBlock Text="闪传" FontWeight="SemiBold" FontSize="15" />
+                    <TextBlock x:Name="PhaseText" Text="正在准备" Foreground="#667085" FontSize="12" />
+                </StackPanel>
+                <Button x:Name="HideButton" Grid.Column="2" Content="×" Width="28" Height="28" Padding="0" Margin="0" Click="OnHide" Background="Transparent" BorderThickness="0" FontSize="20" />
+            </Grid>
+            <TextBlock x:Name="TitleText" Margin="0,16,0,6" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+            <TextBlock x:Name="DetailText" Foreground="#667085" TextWrapping="Wrap" MaxHeight="46" />
+            <ProgressBar x:Name="UploadProgress" Height="7" Minimum="0" Maximum="100" Margin="0,14,0,8" />
+            <Grid>
+                <TextBlock x:Name="BytesText" Foreground="#667085" FontSize="12" />
+                <TextBlock x:Name="PercentText" HorizontalAlignment="Right" Foreground="#2563EB" FontWeight="SemiBold" />
+            </Grid>
+            <TextBlock x:Name="QueueText" Foreground="#667085" FontSize="12" Margin="0,5,0,0" />
+            <Button Content="取消传输" Command="{Binding CancelCommand}" HorizontalAlignment="Stretch" Margin="0,12,0,0" />
+        </StackPanel>
+    </Border>
+</Window>

@@ -1,0 +1,159 @@
+<Window x:Class="Shanchuan.Windows.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="闪传" Width="1080" Height="700" MinWidth="900" MinHeight="580"
+        Icon="Assets/app.ico" AllowDrop="True" Drop="OnDrop" DragOver="OnDragOver"
+        Background="#F3F6FB" WindowStartupLocation="CenterScreen">
+    <Grid>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="218" />
+            <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
+
+        <Border Grid.Column="0" Background="#FFFFFF" BorderBrush="#E5EAF1" BorderThickness="0,0,1,0">
+            <DockPanel Margin="18">
+                <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,6,0,34">
+                    <Image Source="Assets/app.png" Width="44" Height="44" />
+                    <StackPanel Margin="12,1,0,0">
+                        <TextBlock Text="闪传" FontSize="24" FontWeight="SemiBold" Foreground="#172033" />
+                        <TextBlock Text="Windows 版" FontSize="12" Foreground="#667085" />
+                    </StackPanel>
+                </StackPanel>
+                <StackPanel DockPanel.Dock="Bottom">
+                    <TextBlock Text="请在配置中心明确选择内网或外网；权限由所选位置决定" TextWrapping="Wrap" Foreground="#667085" FontSize="12" Margin="4,12" />
+                    <Button Content="配置中心" Click="OpenSettings" Background="#EFF6FF" Foreground="#1D4ED8" />
+                </StackPanel>
+                <StackPanel>
+                    <Button Content="剪贴板记录" Click="NavigateHistory" HorizontalContentAlignment="Left" Background="Transparent" BorderThickness="0" FontSize="15" />
+                    <Button Content="传输日志" Click="NavigateLogs" HorizontalContentAlignment="Left" Background="Transparent" BorderThickness="0" FontSize="15" />
+                    <Button Content="使用说明" Click="NavigateHelp" HorizontalContentAlignment="Left" Background="Transparent" BorderThickness="0" FontSize="15" />
+                </StackPanel>
+            </DockPanel>
+        </Border>
+
+        <DockPanel Grid.Column="1" Margin="28,22,28,20">
+            <Grid DockPanel.Dock="Top" Margin="0,0,0,10">
+                <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                <TextBlock x:Name="PageTitle" Text="剪贴板记录" FontSize="27" FontWeight="SemiBold" Foreground="#172033" />
+                <Border Grid.Column="1" Background="#E0EAFB" CornerRadius="6" Padding="12,6" VerticalAlignment="Center">
+                    <TextBlock Text="{Binding NetworkStatus}" FontWeight="SemiBold" Foreground="#1D4ED8" />
+                </Border>
+            </Grid>
+            <StackPanel DockPanel.Dock="Top" Margin="0,0,0,16">
+                <TextBlock Text="{Binding ReceiveStatus}" TextWrapping="Wrap" Foreground="#475467" />
+                <TextBlock Text="{Binding HotkeyStatus}" TextWrapping="Wrap" Foreground="#667085" FontSize="12" Margin="0,5,0,0" />
+            </StackPanel>
+
+            <Border DockPanel.Dock="Bottom" Background="#FFFFFF" CornerRadius="8" Padding="12,9" Margin="0,14,0,0" BorderBrush="#E5EAF1" BorderThickness="1">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="220" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Orientation="Horizontal">
+                        <Ellipse Width="8" Height="8" Fill="#22C55E" Margin="0,0,8,0" />
+                        <TextBlock Text="{Binding StatusMessage}" Foreground="#475467" TextTrimming="CharacterEllipsis" />
+                    </StackPanel>
+                    <ProgressBar x:Name="MainProgress" Grid.Column="1" Height="5" Minimum="0" Maximum="100" Margin="12,0" VerticalAlignment="Center" Visibility="Collapsed" />
+                    <TextBlock Grid.Column="2" Text="{Binding QueuedCount, StringFormat=等待 {0} 项}" Foreground="#667085" />
+                </Grid>
+            </Border>
+
+            <Grid>
+                <Grid x:Name="HistoryPanel">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+                    <Grid Margin="0,0,0,12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="120" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBox Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}" MinWidth="220" Margin="0,0,10,0">
+                            <TextBox.Resources><Style TargetType="TextBlock"><Setter Property="Text" Value="" /></Style></TextBox.Resources>
+                        </TextBox>
+                        <ComboBox Grid.Column="1" SelectedValuePath="Tag" SelectedValue="{Binding KindFilter}" Margin="0,0,10,0">
+                            <ComboBoxItem Content="全部类型" Tag="全部" />
+                            <ComboBoxItem Content="文本" Tag="文本" />
+                            <ComboBoxItem Content="图片" Tag="图片" />
+                            <ComboBoxItem Content="文件" Tag="文件" />
+                        </ComboBox>
+                        <CheckBox Grid.Column="2" Content="隐私模式" IsChecked="{Binding PrivacyMode}" VerticalAlignment="Center" />
+                    </Grid>
+                    <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="-4,0,0,12">
+                        <Button Content="添加文件" Click="AddFiles" IsEnabled="{Binding CanSend}" Background="#2563EB" Foreground="White" />
+                        <Button Content="添加文件夹" Click="AddFolder" IsEnabled="{Binding CanSend}" />
+                        <Button Content="重新发送" Command="{Binding ResendCommand}" IsEnabled="{Binding CanSend}" />
+                        <Button Content="删除记录" Command="{Binding DeleteCommand}" />
+                        <Button Content="清空" Click="ClearHistory" />
+                        <TextBlock Text="也可以将文件或文件夹拖入窗口" VerticalAlignment="Center" Foreground="#667085" Margin="12,0,0,0" />
+                    </StackPanel>
+                    <DataGrid Grid.Row="2" ItemsSource="{Binding HistoryRows}" SelectedItem="{Binding SelectedHistory}"
+                              AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False" CanUserDeleteRows="False"
+                              SelectionMode="Single" HeadersVisibility="Column" GridLinesVisibility="Horizontal"
+                              Background="#FFFFFF" BorderBrush="#E5EAF1" RowHeight="48" AlternationCount="2"
+                              AlternatingRowBackground="#F8FAFC">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="内容" Binding="{Binding Title}" Width="*" />
+                            <DataGridTextColumn Header="类型" Binding="{Binding Kind}" Width="80" />
+                            <DataGridTextColumn Header="时间" Binding="{Binding Date}" Width="160" />
+                            <DataGridTextColumn Header="状态" Binding="{Binding Status}" Width="100" />
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </Grid>
+
+                <Grid x:Name="LogsPanel" Visibility="Collapsed">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+                    <Grid Margin="0,0,0,14">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBox x:Name="LogSearch" TextChanged="FilterLogs" Margin="0,0,10,0" />
+                        <Button Grid.Column="1" Content="清空日志" Click="ClearLogs" />
+                    </Grid>
+                    <DataGrid Grid.Row="1" ItemsSource="{Binding Logs}" AutoGenerateColumns="False" IsReadOnly="True"
+                              CanUserAddRows="False" Background="#FFFFFF" BorderBrush="#E5EAF1" RowHeight="44">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="时间" Binding="{Binding Date, StringFormat=yyyy-MM-dd HH:mm:ss}" Width="170" />
+                            <DataGridTextColumn Header="级别" Binding="{Binding Level}" Width="90" />
+                            <DataGridTextColumn Header="事件" Binding="{Binding Message}" Width="*" />
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </Grid>
+
+                <ScrollViewer x:Name="HelpPanel" Visibility="Collapsed" VerticalScrollBarVisibility="Auto">
+                    <StackPanel MaxWidth="720" HorizontalAlignment="Left">
+                        <Border Background="#EFF6FF" CornerRadius="10" Padding="22" Margin="0,0,0,18">
+                            <StackPanel>
+                                <TextBlock Text="全局快捷键" FontSize="19" FontWeight="SemiBold" Foreground="#1E3A8A" />
+                                <TextBlock Text="{Binding Settings.Shortcuts.Copy.DisplayName}" FontSize="24" FontWeight="SemiBold" Margin="0,14,0,4" />
+                                <TextBlock Text="外网模式下，复制当前应用选中的内容，记录并发送到内网。" TextWrapping="Wrap" />
+                                <TextBlock Text="{Binding Settings.Shortcuts.Paste.DisplayName}" FontSize="24" FontWeight="SemiBold" Margin="0,18,0,4" />
+                                <TextBlock Text="在当前应用粘贴，不触发上传。" TextWrapping="Wrap" />
+                                <TextBlock Text="Ctrl+C 始终只是 Windows 普通复制：不记录、不上传。" FontWeight="SemiBold" Foreground="#B42318" Margin="0,18,0,0" />
+                            </StackPanel>
+                        </Border>
+                        <TextBlock Text="内网与外网权限" FontSize="18" FontWeight="SemiBold" />
+                        <TextBlock Text="必须先在配置中心选择位置。内网只接收：允许 FTP 下载、删除，禁止上传；外网只发送：允许 FTP 上传，禁止下载和删除。不会根据 IP 自动判断，未设置时两种操作都禁用。" TextWrapping="Wrap" LineHeight="25" Margin="0,8,0,20" />
+                        <TextBlock Text="接收与保存" FontSize="18" FontWeight="SemiBold" />
+                        <TextBlock Text="内网按配置间隔检查外网投递。文本、文件或文件夹接收成功后进入历史并写入 Windows 剪贴板；文件和文件夹同时保存到接收目录。MD5 或 ZIP 校验失败会保留远端数据供重试，同名本地文件不会被覆盖。" TextWrapping="Wrap" LineHeight="25" Margin="0,8,0,20" />
+                        <TextBlock Text="文件与文件夹" FontSize="18" FontWeight="SemiBold" />
+                        <TextBlock Text="外网可点击“添加文件／添加文件夹”，或直接将它们拖入窗口。文件夹会先应用排除规则，再打包为 ZIP 发送。快捷键发送、拖入和重发目录都会应用相同规则。" TextWrapping="Wrap" LineHeight="25" Margin="0,8,0,20" />
+                        <TextBlock Text="FTP 投递与接收" FontSize="18" FontWeight="SemiBold" />
+                        <TextBlock Text="配置中心中的服务器、目录和快捷键会在修改后自动保存。密码单独保存在 Windows 凭据管理器，不写入 settings.json。测试连接只验证登录与目录访问，不会上传、创建或删除文件；内网自动接收成功后才会删除对应远端数据。" TextWrapping="Wrap" LineHeight="25" Margin="0,8,0,20" />
+                        <TextBlock Text="传输与数据" FontSize="18" FontWeight="SemiBold" />
+                        <TextBlock Text="发送任务串行执行，可取消当前传输并清空等待队列。历史、图片缓存、接收状态和日志保存在 %AppData%\Shanchuan。关闭主窗口只会最小化到托盘，请通过托盘菜单真正退出。" TextWrapping="Wrap" LineHeight="25" Margin="0,8,0,20" />
+                    </StackPanel>
+                </ScrollViewer>
+            </Grid>
+        </DockPanel>
+    </Grid>
+</Window>
