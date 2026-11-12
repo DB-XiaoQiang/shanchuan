@@ -10,7 +10,7 @@ import xml.etree.ElementTree as ET
 from urllib.parse import quote, urlparse
 
 root = pathlib.Path(__file__).resolve().parents[1]
-archive = root / 'dist/闪传-macos-arm64.zip'
+archive = root / 'dist/Shanchuan-macos-arm64.zip'
 feed = os.environ.get('SHANCHUAN_UPDATE_FEED', '')
 key = os.environ.get('SPARKLE_PRIVATE_KEY', '')
 if not key:

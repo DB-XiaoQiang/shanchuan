@@ -30,7 +30,7 @@ swift build -c release --arch arm64
 BIN_DIR="$(swift build -c release --arch arm64 --show-bin-path)"
 DIST="$PWD/dist"
 FINAL_APP="$DIST/闪传.app"
-FINAL_ZIP="$DIST/闪传-macos-arm64.zip"
+FINAL_ZIP="$DIST/Shanchuan-macos-arm64.zip"
 if [[ -L "$DIST" || -L "$FINAL_APP" || -L "$FINAL_ZIP" ]]; then
     print -u2 '打包输出路径不能是符号链接；为避免覆盖其他位置，已停止。'
     exit 1
@@ -113,10 +113,10 @@ if [[ "$UNSIGNED_CI" != 1 ]]; then
         xcrun stapler validate "$APP"
     fi
 fi
-/usr/bin/ditto -c -k --keepParent "$APP" "$PACKAGE_WORK/闪传-macos-arm64.zip"
+/usr/bin/ditto -c -k --keepParent "$APP" "$PACKAGE_WORK/Shanchuan-macos-arm64.zip"
 if [[ -e "$FINAL_APP" ]]; then
     /bin/mv -- "$FINAL_APP" "$PACKAGE_WORK/previous.app"
 fi
 /bin/mv -- "$APP" "$FINAL_APP"
-/bin/mv -f -- "$PACKAGE_WORK/闪传-macos-arm64.zip" "$FINAL_ZIP"
+/bin/mv -f -- "$PACKAGE_WORK/Shanchuan-macos-arm64.zip" "$FINAL_ZIP"
 print -r -- "$FINAL_APP"
