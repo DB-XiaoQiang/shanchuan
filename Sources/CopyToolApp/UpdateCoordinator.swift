@@ -20,9 +20,21 @@ struct UpdatePersistentState: Codable {
     var relayed: [String] = []
     var relayRetryAfter: Date?
     var relayFailures = 0
+    var lastCheckCompletedAt: Date?
 }
 
-enum UpdateHTTPFailure: Error { case status(Int) }
+enum UpdateHTTPFailure: LocalizedError {
+    case status(Int)
+    var errorDescription: String? {
+        switch self {
+        case .status(401): return "更新服务要求访问权限（HTTP 401）。"
+        case .status(403): return "更新服务拒绝访问（HTTP 403），请稍后重试。"
+        case .status(429): return "更新检查过于频繁（HTTP 429），请稍后重试。"
+        case .status(let code) where code >= 500: return "更新服务暂时不可用（HTTP \(code)），请稍后重试。"
+        case .status(let code): return "更新服务返回 HTTP \(code)。"
+        }
+    }
+}
 
 private struct GitHubLatestRelease: Decodable {
     let tag_name: String
@@ -33,6 +45,7 @@ private struct GitHubLatestRelease: Decodable {
 /// All automatic work is data-only; Sparkle is not started until the user asks to install.
 @MainActor final class UpdateCoordinator: ObservableObject {
     static let repository = "https://github.com/DB-XiaoQiang/shanchuan"
+    static let downloadPage = URL(string: repository + "/releases")!
     @Published private(set) var status = "等待检查更新"
     @Published private(set) var relayStatus = ""
     @Published private(set) var candidateVersion: String?
@@ -40,6 +53,7 @@ private struct GitHubLatestRelease: Decodable {
     @Published private(set) var isChecking = false
     @Published private(set) var isRelaying = false
     @Published private(set) var waitingForInstallation = false
+    @Published private(set) var lastCheckCompletedAt: Date?
     var currentVersion: String
     var ftpSettings: () -> FTPSettings? = { nil }
     var businessIsBusy: () -> Bool = { false }
@@ -72,6 +86,7 @@ private struct GitHubLatestRelease: Decodable {
         self.dataLoader = dataLoader; self.testUpload = upload
         state = (try? Data(contentsOf: self.root.appendingPathComponent("state.json")))
             .flatMap { try? JSONDecoder().decode(UpdatePersistentState.self, from: $0) } ?? UpdatePersistentState()
+        lastCheckCompletedAt = state.lastCheckCompletedAt
         candidateVersion = nil
         if self.publicKey == nil { status = "此构建未配置更新验签公钥" }
     }
@@ -82,7 +97,7 @@ private struct GitHubLatestRelease: Decodable {
     }
     var displayedVersion: String { Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "开发构建" }
     var canInstall: Bool { candidateVersion != nil && !waitingForInstallation }
-    var canCheck: Bool { !isChecking && publicKey != nil }
+    var canCheck: Bool { !isChecking && !waitingForInstallation && publicKey != nil }
     var isBusy: Bool { isRelaying || waitingForInstallation }
 
     func start() {
@@ -107,7 +122,7 @@ private struct GitHubLatestRelease: Decodable {
         tick()
     }
     func check() { guard canCheck else { return }; Task { await checkNow() } }
-    func checkNow() async { await performCheck() }
+    func checkNow() async { await performCheck(manual: true) }
     func tick(now: Date = Date()) {
         guard enabled, !waitingForInstallation else { return }
         if state.schedule.isDue(at: now) && !isChecking { Task { await performCheck() } }
@@ -160,10 +175,19 @@ private struct GitHubLatestRelease: Decodable {
             status = "新版本 \(verified.manifest.version) 已下载，可安装"
         } else { candidateVersion = nil; status = "当前已是最新版本" }
     }
-    private func performCheck() async {
+    private func performCheck(manual: Bool = false) async {
         guard !isChecking, !waitingForInstallation, let publicKey else { return }
         isChecking = true; status = "正在检查更新…"
-        defer { isChecking = false }
+        if manual { writeLog?("开始手动检查正式更新", false) }
+        var failed = false
+        defer {
+            let completedAt = Date()
+            lastCheckCompletedAt = completedAt
+            state.lastCheckCompletedAt = completedAt
+            try? save()
+            isChecking = false
+            if manual { writeLog?("手动检查完成：" + status, failed) }
+        }
         do {
             try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
             let metadataBytes: Data
@@ -171,7 +195,7 @@ private struct GitHubLatestRelease: Decodable {
                 metadataBytes = try await fetch(URL(string: "https://api.github.com/repos/DB-XiaoQiang/shanchuan/releases/latest")!, maximum: 2 * 1024 * 1024)
             } catch UpdateHTTPFailure.status(404) {
                 state.schedule.succeeded(at: Date()); try save()
-                if let release { showCandidate(release) } else { status = "暂无正式更新" }
+                if let release { showCandidate(release) } else { status = "暂无正式更新；测试版请手动下载" }
                 return
             }
             let metadata = try JSONDecoder().decode(GitHubLatestRelease.self, from: metadataBytes)
@@ -207,11 +231,14 @@ private struct GitHubLatestRelease: Decodable {
             try signature.write(to: directory.appendingPathComponent("update-manifest.sig"), options: .atomic)
             release = verified; state.candidateVersion = version; state.candidateIdentity = verified.identity; state.highestVersion = version
             state.schedule.succeeded(at: Date()); try save()
-            showCandidate(verified); writeLog?("已验证发行版 \(version)，更新已缓存", false)
+            showCandidate(verified)
+            if !manual { writeLog?("已验证发行版 \(version)，更新已缓存", false) }
             beginRelay()
         } catch {
+            failed = true
             status = "检查或下载更新失败：\(error.localizedDescription)"
-            state.schedule.failed(at: Date()); try? save(); writeLog?(status, true)
+            state.schedule.failed(at: Date()); try? save()
+            if !manual { writeLog?(status, true) }
         }
     }
     private static func assetBase(version: String) -> URL {

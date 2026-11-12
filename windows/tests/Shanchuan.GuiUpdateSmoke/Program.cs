@@ -209,7 +209,7 @@ internal static class Program
         var windows = AutomationElement.RootElement.FindAll(TreeScope.Children, new PropertyCondition(AutomationElement.ProcessIdProperty, newer.Id));
         Require(windows.Cast<AutomationElement>().Count(x => x.Current.Name.StartsWith("闪传", StringComparison.Ordinal)) == 1, "Configuration opened an additional settings window.");
         SaveScreenshot(newWindow, "updated-gui-settings-page.png");
-        Checks.Add("actual-0.1.2-gui-restarted-with-embedded-settings-and-no-extra-settings-window");
+        Checks.Add("actual-" + TargetVersion + "-gui-restarted-with-embedded-settings-and-no-extra-settings-window");
         Checks.Add("synthetic-settings-history-and-referenced-media-byte-preserved");
         File.WriteAllText(Path.Combine(ReportRoot, "gui-processes.json"), JsonSerializer.Serialize(new { oldPid, newPid = newer.Id, oldVersion = BaseVersion, newVersion = ProductVersion(executable) }, JsonOptions));
     }

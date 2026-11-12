@@ -1,4 +1,5 @@
 using System.IO;
+using System.Diagnostics;
 using System.Reflection;
 using System.Security.Cryptography;
 using System.Text.Json;
@@ -33,17 +34,22 @@ public sealed class AppUpdateService : ObservableObject, IDisposable
     private bool _requesting;
     private bool _disposed;
     private string? _installationStatus;
+    private bool _manualChecking;
+    private DateTimeOffset? _lastManualCheckAt;
+    private string _lastManualCheckResult = "";
 
     public static string InstalledVersion =>
         (Assembly.GetExecutingAssembly().GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
          ?? Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "0.0.0").Split('+')[0];
 
-    public AppUpdateService(AppViewModel owner, string root)
+    public AppUpdateService(AppViewModel owner, string root) : this(owner, root, null) { }
+
+    public AppUpdateService(AppViewModel owner, string root, UpdateCoordinator? coordinator)
     {
         _owner = owner;
         _dispatcher = System.Windows.Application.Current?.Dispatcher ?? Dispatcher.CurrentDispatcher;
         _authorizationPath = Path.Combine(root, "Updates", "install-authorization.json");
-        _coordinator = new UpdateCoordinator(root, InstalledVersion,
+        _coordinator = coordinator ?? new UpdateCoordinator(root, InstalledVersion,
             () => owner.Settings.Clone(), owner.ReadUpdatePassword, () => owner.HasBusinessTransfers,
             transferGate: owner.UpdateTransferGate);
         _snapshot = _coordinator.Snapshot;
@@ -54,11 +60,20 @@ public sealed class AppUpdateService : ObservableObject, IDisposable
 
     public string CurrentVersion => "v" + InstalledVersion;
     public string? CandidateVersion => _snapshot.CandidateVersion;
-    public string Status => _installationStatus ?? _snapshot.Status;
+    public string Status => _installationStatus ?? (_manualChecking ? "正在检查更新…" :
+        !_coordinator.IsBusy && (_snapshot.Status is "检查中" or "下载中") ? "等待检查更新" : _snapshot.Status);
+    public string LastCheckedText => _manualChecking ? "正在手动检查更新…" :
+        _lastManualCheckAt is { } checkedAt
+            ? $"手动检查完成 {checkedAt:yyyy-MM-dd HH:mm:ss}\n{_lastManualCheckResult}"
+            : "尚未手动检查";
+    public string CheckButtonText => _manualChecking ? "正在检查…" : "检查更新 / 重试";
+    public string DownloadPageUrl => "https://github.com/DB-XiaoQiang/shanchuan/releases";
+    public RelayCommand OpenDownloadsCommand => _openDownloadsCommand ??= new RelayCommand(_ => OpenDownloads(), _ => !_disposed);
+    private RelayCommand? _openDownloadsCommand;
     public string RelayStatus => _snapshot.RelayStatus;
     public string ReleaseNotes => _snapshot.ReleaseNotes;
-    public bool CanCheck => !_ticking && !_requesting && !_installing && _authorized is null;
-    public bool CanInstall => _snapshot.CanInstall && !_requesting && !_ticking && !_coordinator.IsBusy && !_installing && _authorized is null;
+    public bool CanCheck => !_disposed && !_ticking && !_requesting && !_installing && !_coordinator.IsBusy && _authorized is null;
+    public bool CanInstall => !_disposed && _snapshot.CanInstall && !_requesting && !_ticking && !_coordinator.IsBusy && !_installing && _authorized is null;
     public string InstallButtonText => CandidateVersion is { Length: > 0 } version ? $"更新至 v{version}" : "更新";
     public Visibility InstallButtonVisibility => _snapshot.CanInstall ? Visibility.Visible : Visibility.Collapsed;
 
@@ -107,8 +122,19 @@ public sealed class AppUpdateService : ObservableObject, IDisposable
         NotifyState();
     }
 
-    public Task CheckAsync() => TickAsync(manual: true);
-    public Task RetryAsync() => TickAsync(manual: true);
+    public Task CheckAsync() => CanCheck ? TickAsync(manual: true) : Task.CompletedTask;
+    public Task RetryAsync() => CheckAsync();
+
+    private void OpenDownloads()
+    {
+        try { Process.Start(new ProcessStartInfo(DownloadPageUrl) { UseShellExecute = true }); }
+        catch (Exception error)
+        {
+            var message = "无法打开下载页：" + ReadableError(error);
+            SetInstallationStatus(message);
+            _owner.ReportUpdateMessage(message, error: true);
+        }
+    }
 
     public async Task RequestInstallAsync(Window owner)
     {
@@ -168,8 +194,14 @@ public sealed class AppUpdateService : ObservableObject, IDisposable
 
     private async Task TickAsync(bool manual = false)
     {
-        if (_disposed || _ticking || _requesting || _installing) return;
+        if (_disposed || _ticking || _requesting || _installing || (manual && _authorized is not null)) return;
         _ticking = true;
+        if (manual)
+        {
+            _manualChecking = true;
+            _installationStatus = null;
+        }
+        string? manualResult = null;
         using var tick = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
         _currentTick = tick;
         NotifyState();
@@ -178,17 +210,54 @@ public sealed class AppUpdateService : ObservableObject, IDisposable
             if (_authorized is not null) await TryInstallAsync();
             else
             {
-                if (manual) _installationStatus = null;
                 await _coordinator.TickAsync(manual, tick.Token);
             }
         }
-        catch (OperationCanceledException) when (tick.IsCancellationRequested) { }
+        catch (OperationCanceledException) when (tick.IsCancellationRequested)
+        {
+            manualResult = "检查已取消，请重试。";
+        }
         catch (Exception error)
         {
-            SetInstallationStatus("检查更新失败，点击重试");
-            _owner.ReportUpdateMessage(error.Message, error: true);
+            manualResult = "检查失败：" + ReadableError(error);
+            SetInstallationStatus(manualResult);
+            _owner.ReportUpdateMessage(manualResult, error: true);
         }
-        finally { _currentTick = null; _ticking = false; NotifyState(); }
+        finally
+        {
+            if (manual)
+            {
+                _manualChecking = false;
+                _lastManualCheckAt = DateTimeOffset.Now;
+                _lastManualCheckResult = manualResult ?? (tick.IsCancellationRequested
+                    ? "检查已取消，请重试。" : DescribeManualResult(_coordinator.Snapshot));
+            }
+            _currentTick = null;
+            _ticking = false;
+            NotifyState();
+        }
+    }
+
+    private static string DescribeManualResult(UpdateSnapshot snapshot)
+    {
+        if (snapshot.Status == "当前无正式更新")
+            return "暂无正式更新；测试版请点“下载测试版”手动下载安装。";
+        if (snapshot.Status == "当前无内网更新")
+            return "FTP 中暂无可用的正式更新。";
+        if (snapshot.Status == "请先选择网络位置")
+            return "检查未执行，请先在配置中心选择内网或外网。";
+        if (snapshot.CanInstall && snapshot.CandidateVersion is { } version)
+            return $"发现已验证版本 v{version}，可点击更新。";
+        return snapshot.Status;
+    }
+
+    private string ReadableError(Exception error)
+    {
+        var message = error.Message;
+        var password = _owner.ReadUpdatePassword();
+        if (!string.IsNullOrEmpty(password)) message = message.Replace(password, "***", StringComparison.Ordinal);
+        if (!string.IsNullOrEmpty(_owner.Settings.Username)) message = message.Replace(_owner.Settings.Username, "***", StringComparison.Ordinal);
+        return message.Replace('\r', ' ').Replace('\n', ' ');
     }
 
     private async Task TryInstallAsync()
@@ -306,6 +375,7 @@ public sealed class AppUpdateService : ObservableObject, IDisposable
         if (_disposed) return;
         if (!_dispatcher.CheckAccess()) { _dispatcher.BeginInvoke(new Action(NotifyState)); return; }
         foreach (var property in new[] { nameof(CurrentVersion), nameof(CandidateVersion), nameof(Status), nameof(RelayStatus),
+            nameof(LastCheckedText), nameof(CheckButtonText),
             nameof(ReleaseNotes), nameof(CanCheck), nameof(CanInstall), nameof(InstallButtonText), nameof(InstallButtonVisibility) })
             OnPropertyChanged(property);
     }

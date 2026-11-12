@@ -33,10 +33,7 @@ import AppKit
         }.defaultSize(width: 1000, height: 720)
         .commands {
             AppNavigationCommands(navigation: navigation)
-            CommandGroup(after: .appInfo) {
-                Button("检查更新…") { updates.check() }
-                    .disabled(!updates.canCheck)
-            }
+            UpdateCommands(updates: updates)
             CommandGroup(after: .pasteboard) {
                 Button("添加文件…") { model.chooseFiles() }.keyboardShortcut("o")
                 Button("恢复选中记录") { if let item = model.selectedEntry { model.restore(item) } }.keyboardShortcut("r")
@@ -48,6 +45,19 @@ import AppKit
             if model.transferSnapshot.isActive {
                 Label(model.transferMenuTitle, systemImage: "arrow.up.circle.fill")
             } else { Image(systemName: "bolt.fill").accessibilityLabel("闪传") }
+        }
+    }
+}
+struct UpdateCommands: Commands {
+    @ObservedObject var updates: UpdateCoordinator
+    @Environment(\.openWindow) private var openWindow
+    var body: some Commands {
+        CommandGroup(after: .appInfo) {
+            Button("检查更新…") {
+                openWindow(id: "main")
+                NSApp.activate(ignoringOtherApps: true)
+                updates.check()
+            }.disabled(!updates.canCheck)
         }
     }
 }

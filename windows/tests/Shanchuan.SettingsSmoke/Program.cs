@@ -54,11 +54,12 @@ internal static class Program
         viewModel.InitializeUpdates(dataRoot);
         var window = new MainWindow(viewModel) { Width = 1080, Height = 800 };
         var exitCode = 1;
-        window.Loaded += (_, _) => window.Dispatcher.BeginInvoke(new Action(() =>
+        window.Loaded += (_, _) => window.Dispatcher.BeginInvoke(new Action(async () =>
         {
             try
             {
                 RunAssertions(application, window, viewModel, settingsStore, credentials, output);
+                await RunUpdateFeedbackAssertionsAsync(application, window, viewModel, dataRoot);
                 File.WriteAllText(Path.Combine(output, "settings-smoke-report.json"), JsonSerializer.Serialize(new
                 {
                     passed = true,
@@ -153,6 +154,93 @@ internal static class Program
         Check(Find<TextBox>(page, "SettingPort").Text == "2121", "corrected-value-survives-reentry");
         Check(viewModel.Settings.NetworkMode == NetworkMode.Unconfigured, "fixture-remains-network-disabled");
         Check(window.TrySaveSettingsBeforeClose(), "valid-settings-allow-close");
+    }
+
+    private static async Task RunUpdateFeedbackAssertionsAsync(Application application, MainWindow window,
+        AppViewModel viewModel, string root)
+    {
+        var source = new ControlledUpdateSource();
+        var fixedNow = new DateTimeOffset(2026, 11, 12, 13, 0, 0, TimeSpan.Zero);
+        var external = new AppSettings { NetworkMode = NetworkMode.External, Host = "ftp.example.invalid", Username = "smoke-user" };
+        var coordinator = new UpdateCoordinator(Path.Combine(root, "feedback"), AppUpdateService.InstalledVersion,
+            () => external, () => "synthetic-password", () => false, source: source,
+            transport: new ForbiddenUpdateTransport(), clock: () => fixedNow);
+        using var updates = new AppUpdateService(viewModel, root, coordinator);
+        var status = Find<TextBlock>(window, "UpdateStatus");
+        var checkedText = Find<TextBlock>(window, "UpdateLastChecked");
+        // Retain the real production bindings, overriding only their inherited
+        // source with an isolated service whose network ports are all fake.
+        status.DataContext = new { Updates = updates };
+        checkedText.DataContext = new { Updates = updates };
+        try
+        {
+            var operation = updates.CheckAsync();
+            Pump();
+            Check(!operation.IsCompleted && !updates.CanCheck && status.Text == "正在检查更新…",
+                "manual-check-shows-pending-state-without-network");
+            Check(checkedText.Text.Contains("正在手动检查"), "manual-check-feedback-binding-updates");
+            source.Response.SetResult(null);
+            await operation;
+            Pump();
+            Check(updates.CanCheck && checkedText.Text.Contains("暂无正式更新") && checkedText.Text.Contains("下载测试版"),
+                "no-stable-release-explains-manual-test-download");
+            Check(checkedText.Text.Contains("手动检查完成 ") && checkedText.Text.Contains(DateTime.Now.ToString("yyyy-MM-dd")),
+                "manual-check-shows-local-completion-time");
+            var completedText = checkedText.Text;
+            updates.Start();
+            await Task.Delay(1200);
+            Pump();
+            Check(checkedText.Text == completedText && source.Requests == 1,
+                "background-tick-preserves-manual-result-and-time");
+            source.ResetPending();
+            var cancelled = updates.CheckAsync();
+            Pump();
+            Check(viewModel.SaveSettingsNow(), "synthetic-config-save-cancels-old-manual-check");
+            await cancelled;
+            Pump();
+            Check(checkedText.Text.Contains("检查已取消") && status.Text != "检查中",
+                "cancelled-manual-check-finishes-with-explicit-feedback");
+            source.Fail = true;
+            await updates.CheckAsync();
+            Pump();
+            Check(checkedText.Text.Contains("synthetic-check-error"), "manual-check-preserves-readable-failure");
+            Check(application.Windows.Count == 1, "manual-check-feedback-opens-no-dialog");
+            Check(updates.DownloadPageUrl == "https://github.com/DB-XiaoQiang/shanchuan/releases" &&
+                  updates.OpenDownloadsCommand.CanExecute(null), "download-entry-is-official-releases-page");
+            updates.Dispose();
+            var requests = source.Requests;
+            await updates.CheckAsync();
+            Check(!updates.CanCheck && source.Requests == requests, "disabled-check-entry-performs-no-work");
+        }
+        finally
+        {
+            status.ClearValue(FrameworkElement.DataContextProperty);
+            checkedText.ClearValue(FrameworkElement.DataContextProperty);
+        }
+    }
+
+    private sealed class ControlledUpdateSource : Shanchuan.Core.IUpdateSource
+    {
+        public TaskCompletionSource<RemoteUpdateRelease?> Response { get; private set; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public void ResetPending() => Response = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public int Requests { get; private set; }
+        public bool Fail { get; set; }
+        public Task<RemoteUpdateRelease?> GetLatestAsync(CancellationToken token)
+        {
+            Requests++;
+            return Fail ? Task.FromException<RemoteUpdateRelease?>(new IOException("synthetic-check-error")) : Response.Task.WaitAsync(token);
+        }
+        public Task DownloadAssetAsync(string tag, UpdateAsset asset, string destination, CancellationToken token) =>
+            throw new InvalidOperationException("A no-release check must not download a package.");
+    }
+
+    private sealed class ForbiddenUpdateTransport : IUpdateRelay
+    {
+        public Task RelayAsync(VerifiedUpdate candidate, AppSettings settings, string password, CancellationToken token) =>
+            throw new InvalidOperationException("This feedback smoke test must not access FTP.");
+        public Task<VerifiedUpdate?> ReceiveAsync(UpdateCache cache, UpdateManifestVerifier verifier, string minimumVersion,
+            AppSettings settings, string password, CancellationToken token) =>
+            throw new InvalidOperationException("This feedback smoke test must not access FTP.");
     }
 
     private static string Title(MainWindow window) => ((TextBlock)window.FindName("PageTitle")).Text;

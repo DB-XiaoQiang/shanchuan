@@ -28,11 +28,17 @@ struct RootView: View {
                 Divider()
                 Text("版本 " + updates.displayedVersion).font(.caption).foregroundStyle(.secondary)
                 Text(updates.status).font(.caption).textSelection(.enabled)
+                if let checkedAt = updates.lastCheckCompletedAt {
+                    Text("最近检查：" + checkedAt.formatted(date: .abbreviated, time: .standard))
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
                 if !updates.relayStatus.isEmpty { Text(updates.relayStatus).font(.caption2).foregroundStyle(.secondary) }
                 HStack {
-                    Button("检查更新") { updates.check() }.disabled(!updates.canCheck)
-                    Button("重试") { updates.retry() }.disabled(updates.isChecking || updates.isRelaying)
+                    Button(updates.isChecking ? "检查中…" : "检查更新") { updates.check() }.disabled(!updates.canCheck)
+                    Button("重试") { updates.retry() }.disabled(!updates.canCheck || updates.isRelaying)
                 }.controlSize(.small)
+                Link("测试版下载", destination: UpdateCoordinator.downloadPage).font(.caption)
+                    .help("打开 GitHub 安装包下载页，测试版需要手动安装")
                 if updates.canInstall {
                     Button("更新至 " + (updates.candidateVersion ?? "")) { updates.requestInstall() }
                         .buttonStyle(.borderedProminent).controlSize(.small)

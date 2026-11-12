@@ -17,6 +17,25 @@ private actor UpdateFixtureNetwork {
     func count() -> Int { requests.count }
 }
 
+private actor UpdateFixtureHTTPFailureNetwork {
+    let status: Int
+    private var requestCount = 0
+    private var blocked: Bool
+    private var pending: [CheckedContinuation<Void, Never>] = []
+    init(status: Int, blocked: Bool = false) { self.status = status; self.blocked = blocked }
+    func load(_ url: URL, maximum: Int64) async throws -> Data {
+        requestCount += 1
+        if blocked { await withCheckedContinuation { pending.append($0) } }
+        throw UpdateHTTPFailure.status(status)
+    }
+    func count() -> Int { requestCount }
+    func release() {
+        blocked = false
+        let requests = pending; pending = []
+        for request in requests { request.resume() }
+    }
+}
+
 private actor UpdateFixtureRelay {
     var names: [String] = []
     var destinations: [String] = []
@@ -158,13 +177,121 @@ final class UpdateCoordinatorTests: XCTestCase {
         let coordinator = UpdateCoordinator(root: root, currentVersion: "0.3.0", publicKey: sample.key,
             dataLoader: { _, _ in throw UpdateHTTPFailure.status(404) })
         await coordinator.checkNow()
-        XCTAssertEqual(coordinator.status, "暂无正式更新")
+        XCTAssertEqual(coordinator.status, "暂无正式更新；测试版请手动下载")
         XCTAssertFalse(coordinator.canInstall)
         let bytes = try Data(contentsOf: root.appendingPathComponent("Updates/state.json"))
         let persisted = try JSONDecoder().decode(UpdatePersistentState.self, from: bytes)
         XCTAssertNotNil(persisted.schedule.completedWindow)
         XCTAssertNil(persisted.schedule.retryAfter)
         XCTAssertEqual(persisted.schedule.failureCount, 0)
+    }
+    @MainActor func testRepeatedManualNoReleaseChecksEachCompleteAndReportTheirResult() async throws {
+        let sample = try fixture(), network = UpdateFixtureHTTPFailureNetwork(status: 404)
+        let coordinator = UpdateCoordinator(root: try temporaryRoot(), currentVersion: "0.3.0", publicKey: sample.key,
+            dataLoader: { try await network.load($0, maximum: $1) })
+        var logs: [(String, Bool)] = []
+        coordinator.writeLog = { logs.append(($0, $1)) }
+        XCTAssertNil(coordinator.lastCheckCompletedAt)
+        await coordinator.checkNow()
+        let firstCompletion = try XCTUnwrap(coordinator.lastCheckCompletedAt)
+        XCTAssertEqual(logs.count, 2, "一次手动检查应各记录一次开始和完成")
+        XCTAssertTrue(logs.allSatisfy { !$0.1 })
+        XCTAssertTrue(try XCTUnwrap(logs.last).0.contains("暂无正式更新"))
+        XCTAssertTrue(try XCTUnwrap(logs.last).0.contains("测试版请手动下载"))
+        XCTAssertFalse(coordinator.canInstall)
+        XCTAssertTrue(coordinator.canCheck)
+
+        try await Task.sleep(nanoseconds: 10_000_000)
+        // Exercise the same entry point as the visible button after this daily
+        // window has already completed. Manual checks must still make a request.
+        coordinator.check()
+        for _ in 0..<100 {
+            if let completed = coordinator.lastCheckCompletedAt, completed > firstCompletion, !coordinator.isChecking { break }
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        XCTAssertGreaterThan(try XCTUnwrap(coordinator.lastCheckCompletedAt), firstCompletion)
+        let requests = await network.count()
+        XCTAssertEqual(requests, 2)
+        XCTAssertEqual(logs.count, 4, "重复结果也应有独立的开始和完成记录")
+        XCTAssertTrue(logs.allSatisfy { !$0.1 })
+        XCTAssertFalse(coordinator.isChecking)
+        XCTAssertTrue(coordinator.canCheck)
+    }
+    @MainActor func testBackgroundNoReleaseCheckUpdatesCompletionWithoutManualLogsOrInstallation() async throws {
+        let sample = try fixture(), network = UpdateFixtureHTTPFailureNetwork(status: 404)
+        let coordinator = UpdateCoordinator(root: try temporaryRoot(), currentVersion: "0.3.0", publicKey: sample.key,
+            dataLoader: { try await network.load($0, maximum: $1) })
+        var logs: [(String, Bool)] = [], installs = 0
+        coordinator.writeLog = { logs.append(($0, $1)) }
+        coordinator.install = { _ in installs += 1; return true }
+        coordinator.start()
+        for _ in 0..<100 {
+            if coordinator.lastCheckCompletedAt != nil && !coordinator.isChecking { break }
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        XCTAssertNotNil(coordinator.lastCheckCompletedAt)
+        XCTAssertEqual(coordinator.status, "暂无正式更新；测试版请手动下载")
+        XCTAssertTrue(logs.isEmpty, "后台无正式版本不应记录手动检查日志")
+        XCTAssertEqual(installs, 0)
+        XCTAssertFalse(coordinator.waitingForInstallation)
+        XCTAssertFalse(coordinator.canInstall)
+        let requests = await network.count()
+        XCTAssertEqual(requests, 1)
+    }
+    @MainActor func testHTTPFailuresHaveReadableStatusAndCompletionFeedback() async throws {
+        let sample = try fixture()
+        for status in [403, 500] {
+            XCTAssertTrue(UpdateHTTPFailure.status(status).localizedDescription.contains("HTTP \(status)"))
+            let root = try temporaryRoot(), network = UpdateFixtureHTTPFailureNetwork(status: status)
+            let coordinator = UpdateCoordinator(root: root, currentVersion: "0.3.0", publicKey: sample.key,
+                dataLoader: { try await network.load($0, maximum: $1) })
+            var logs: [(String, Bool)] = []
+            coordinator.writeLog = { logs.append(($0, $1)) }
+            await coordinator.checkNow()
+            XCTAssertTrue(coordinator.status.contains("HTTP \(status)"))
+            XCTAssertNotNil(coordinator.lastCheckCompletedAt, "失败也应明确完成本次手动检查")
+            XCTAssertEqual(logs.count, 2, "手动失败不应在 catch 和完成通知中重复记录错误")
+            XCTAssertFalse(try XCTUnwrap(logs.first).1)
+            XCTAssertTrue(try XCTUnwrap(logs.last).1)
+            XCTAssertTrue(try XCTUnwrap(logs.last).0.contains("HTTP \(status)"))
+            XCTAssertTrue(coordinator.canCheck)
+            XCTAssertFalse(coordinator.canInstall)
+            let state = try JSONDecoder().decode(UpdatePersistentState.self, from: Data(contentsOf: root.appendingPathComponent("Updates/state.json")))
+            XCTAssertEqual(state.schedule.failureCount, 1)
+            XCTAssertNotNil(state.schedule.retryAfter)
+        }
+    }
+    @MainActor func testConcurrentManualNoReleaseChecksDisableTheButtonAndProduceOneResult() async throws {
+        let sample = try fixture(), network = UpdateFixtureHTTPFailureNetwork(status: 404, blocked: true)
+        let coordinator = UpdateCoordinator(root: try temporaryRoot(), currentVersion: "0.3.0", publicKey: sample.key,
+            dataLoader: { try await network.load($0, maximum: $1) })
+        var logs: [(String, Bool)] = []
+        coordinator.writeLog = { logs.append(($0, $1)) }
+        let first = Task { await coordinator.checkNow() }
+        for _ in 0..<100 {
+            if await network.count() > 0 { break }
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        XCTAssertTrue(coordinator.isChecking)
+        XCTAssertFalse(coordinator.canCheck)
+        XCTAssertNil(coordinator.lastCheckCompletedAt)
+        var secondStarted = false
+        let second = Task { secondStarted = true; await coordinator.checkNow() }
+        for _ in 0..<100 {
+            if secondStarted { break }
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        let requestCount = await network.count()
+        XCTAssertEqual(requestCount, 1)
+        XCTAssertEqual(logs.count, 1, "被合并的手动点击不能重复记录开始")
+        await network.release()
+        await first.value; await second.value
+        let finalRequestCount = await network.count()
+        XCTAssertEqual(finalRequestCount, 1)
+        XCTAssertNotNil(coordinator.lastCheckCompletedAt)
+        XCTAssertEqual(logs.count, 2)
+        XCTAssertFalse(coordinator.isChecking)
+        XCTAssertTrue(coordinator.canCheck)
     }
     @MainActor func testConcurrentCheckRequestsAreCoalesced() async throws {
         let sample = try fixture(), network = UpdateFixtureNetwork(responses: sample.responses)
