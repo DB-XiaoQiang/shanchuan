@@ -17,7 +17,7 @@ public static class SendInputService
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (Environment.TickCount64 - start > 2_000)
-                throw new TimeoutException(L.T("请完全松开自定义快捷键后再试。"));
+                throw L.WithDescription(new TimeoutException(L.T("请完全松开自定义快捷键后再试。")), L.M("请完全松开自定义快捷键后再试。"));
             await Task.Delay(20, cancellationToken);
         }
     }
@@ -48,7 +48,7 @@ public static class SendInputService
             Keyboard(key, true), Keyboard(ControlKey, true)
         };
         var sent = SendInput((uint)inputs.Length, inputs, Marshal.SizeOf<Input>());
-        if (sent != inputs.Length) throw new Win32Exception(Marshal.GetLastWin32Error(), L.T("无法向前台应用发送复制或粘贴按键。"));
+        if (sent != inputs.Length) throw L.WithDescription(new Win32Exception(Marshal.GetLastWin32Error(), L.T("无法向前台应用发送复制或粘贴按键。")), L.M("无法向前台应用发送复制或粘贴按键。"));
     }
 
     private static Input Keyboard(uint key, bool keyUp) => new()

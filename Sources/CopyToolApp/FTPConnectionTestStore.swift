@@ -49,7 +49,17 @@ extension FTPConnectionTest: FTPConnectionTesting {}
         }
     }
 
-    @Published private(set) var state = State.idle
+    @Published private(set) var state = State.idle {
+        didSet {
+            if case .failed(let text) = state { failureSource = L10n.capture(text) }
+            else { failureSource = nil }
+        }
+    }
+    private var failureSource: L10n.Snapshot?
+    var localizedText: String {
+        if case .failed(let text) = state { return (failureSource ?? L10n.capture(text)).rendered }
+        return state.text
+    }
     var isTesting: Bool { state == .testing }
 
     private var latestInput: FTPConnectionTestInput?
@@ -67,7 +77,8 @@ extension FTPConnectionTest: FTPConnectionTesting {}
         let settings: FTPSettings
         do { settings = try input.settings() }
         catch {
-            state = .failed(Self.safeErrorMessage(error, password: input.password))
+            let origin = Self.safeErrorSnapshot(error, password: input.password)
+            state = .failed(origin.rendered); failureSource = origin
             return
         }
         let test = makeTest()
@@ -79,7 +90,7 @@ extension FTPConnectionTest: FTPConnectionTesting {}
             let outcome: Outcome
             do { try test.test(settings: settings); outcome = .success }
             catch FTPConnectionTestError.cancelled { outcome = .cancelled }
-            catch { outcome = .failed(Self.safeErrorMessage(error, password: settings.password)) }
+            catch { outcome = .failed(Self.safeErrorSnapshot(error, password: settings.password)) }
             Task { @MainActor [weak self] in
                 self?.complete(outcome, generation: id)
             }
@@ -100,7 +111,7 @@ extension FTPConnectionTest: FTPConnectionTesting {}
     }
 
     private enum Outcome: Sendable {
-        case success, cancelled, failed(String)
+        case success, cancelled, failed(L10n.Snapshot)
     }
 
     private func complete(_ outcome: Outcome, generation id: UUID) {
@@ -109,19 +120,18 @@ extension FTPConnectionTest: FTPConnectionTesting {}
         switch outcome {
         case .success: state = .success
         case .cancelled: state = .idle
-        case .failed(let message): state = .failed(message)
+        case .failed(let origin): state = .failed(origin.rendered); failureSource = origin
         }
     }
 
-    private nonisolated static func safeErrorMessage(_ error: Error, password: String) -> String {
+    private nonisolated static func safeErrorSnapshot(_ error: Error, password: String) -> L10n.Snapshot {
         // 仅显示 Core 定义的错误，第三方/系统错误文本可能带出服务器回显或凭据。
         guard let connectionError = error as? FTPConnectionTestError else {
-            return L10n.text("FTP 连接测试失败，请检查服务状态和配置。")
+            return L10n.snapshot("FTP 连接测试失败，请检查服务状态和配置。")
         }
-        var message = connectionError.errorDescription ?? L10n.text("FTP 连接测试失败。")
-        if !password.isEmpty { message = message.replacingOccurrences(of: password, with: L10n.text("[已隐藏]")) }
-        let scalars = message.unicodeScalars.filter { !CharacterSet.controlCharacters.contains($0) }
-        return String(String(String.UnicodeScalarView(scalars)).prefix(500))
+        let message = connectionError.errorDescription ?? L10n.text("FTP 连接测试失败。")
+        return L10n.capture(message).sanitized(secrets: password.isEmpty ? [] : [password],
+                                              singleLine: true, maximumLength: 500)
     }
 
     deinit { activeTest?.cancel() }

@@ -21,13 +21,13 @@ public sealed class GlobalHotkeyService : IDisposable
     public void Initialize(IntPtr handle)
     {
         _handle = handle;
-        _source = HwndSource.FromHwnd(handle) ?? throw new InvalidOperationException(L.T("无法初始化 Windows 热键窗口。"));
+        _source = HwndSource.FromHwnd(handle) ?? throw L.WithDescription(new InvalidOperationException(L.T("无法初始化 Windows 热键窗口。")), L.M("无法初始化 Windows 热键窗口。"));
         _source.AddHook(WindowProc);
     }
 
     public void Update(ShortcutOptions options)
     {
-        if (_handle == IntPtr.Zero) throw new InvalidOperationException(L.T("全局热键窗口尚未初始化，请重新启动闪传。"));
+        if (_handle == IntPtr.Zero) throw L.WithDescription(new InvalidOperationException(L.T("全局热键窗口尚未初始化，请重新启动闪传。")), L.M("全局热键窗口尚未初始化，请重新启动闪传。"));
         Unregister();
         _options = options.Clone();
         if (!options.Enabled) return;

@@ -16,13 +16,14 @@ public struct ShortcutBinding: Codable, Equatable, Sendable {
         self.modifiers = modifiers
     }
 
-    public var displayName: String {
+    public var displayName: String { displaySnapshot.rendered }
+    public var displaySnapshot: L10n.Snapshot {
         let modifierNames: [(UInt32, String)] = [
             (Self.controlModifier, "⌃"), (Self.optionModifier, "⌥"),
             (Self.shiftModifier, "⇧"), (Self.commandModifier, "⌘")
         ]
-        return modifierNames.filter { modifiers & $0.0 != 0 }.map(\.1).joined()
-            + ShortcutKeyCatalog.displayName(for: keyCode)
+        let prefix = modifierNames.filter { modifiers & $0.0 != 0 }.map(\.1).joined()
+        return L10n.Snapshot.verbatim(prefix).appending(ShortcutKeyCatalog.displaySnapshot(for: keyCode))
     }
 
     fileprivate var validationError: String? {
@@ -72,10 +73,10 @@ public enum ShortcutKeyCatalog {
             (23, "5"), (22, "6"), (26, "7"), (28, "8"), (25, "9"),
             (27, "-"), (24, "="), (33, "["), (30, "]"), (42, "\\"),
             (41, ";"), (39, "'"), (43, ","), (47, "."), (44, "/"), (50, "`"),
-            (49, L10n.text("空格")), (48, "Tab"), (36, "Return"), (51, "Delete"), (53, "Escape"),
+            (49, "空格"), (48, "Tab"), (36, "Return"), (51, "Delete"), (53, "Escape"),
             (123, "←"), (124, "→"), (125, "↓"), (126, "↑"),
             (115, "Home"), (119, "End"), (116, "Page Up"), (121, "Page Down"),
-            (117, L10n.text("向前删除")),
+            (117, "向前删除"),
             (122, "F1"), (120, "F2"), (99, "F3"), (118, "F4"), (96, "F5"),
             (97, "F6"), (98, "F7"), (100, "F8"), (101, "F9"), (109, "F10"),
             (103, "F11"), (111, "F12")
@@ -85,8 +86,10 @@ public enum ShortcutKeyCatalog {
 
     public static let allowedKeyCodes = Set(keys.map(\.keyCode))
 
-    public static func displayName(for keyCode: UInt32) -> String {
-        keys.first { $0.keyCode == keyCode }?.displayName ?? L10n.format("未知按键（%@）", String(describing: keyCode))
+    public static func displayName(for keyCode: UInt32) -> String { displaySnapshot(for: keyCode).rendered }
+    public static func displaySnapshot(for keyCode: UInt32) -> L10n.Snapshot {
+        keys.first { $0.keyCode == keyCode }.map { L10n.snapshot($0.displayName) }
+            ?? L10n.snapshotFormat("未知按键（%@）", String(describing: keyCode))
     }
 }
 
@@ -114,8 +117,8 @@ public struct CopyPasteShortcuts: Codable, Equatable, Sendable {
 
     public var validationError: String? {
         guard enabled else { return nil }
-        if let error = copy.validationError { return L10n.text("复制快捷键：") + error }
-        if let error = paste.validationError { return L10n.text("粘贴快捷键：") + error }
+        if let error = copy.validationError { return L10n.snapshot("复制快捷键：").appending(L10n.capture(error)).rendered }
+        if let error = paste.validationError { return L10n.snapshot("粘贴快捷键：").appending(L10n.capture(error)).rendered }
         if copy == paste { return L10n.text("复制和粘贴快捷键不能相同") }
         return nil
     }

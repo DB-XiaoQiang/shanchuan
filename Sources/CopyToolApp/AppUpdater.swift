@@ -4,7 +4,8 @@ import CopyToolCore
 
 /// Sparkle is created only after explicit approval, never by the daily checker.
 @MainActor final class AppUpdater: NSObject, ObservableObject, SPUUpdaterDelegate {
-    private var controller: SPUStandardUpdaterController?
+    private var updater: SPUUpdater?
+    private var userDriver: LocalizedUpdateUserDriver?
     private var approvedVersion: String?
     private let channel: UpdateChannel
     var isTransferActive: () -> Bool = { false }
@@ -28,15 +29,19 @@ import CopyToolCore
             report(L10n.text("此构建尚未配置 Sparkle 验签公钥，请手动安装正式 DMG。"))
             return false
         }
-        if let controller, !controller.updater.canCheckForUpdates { report(L10n.text("更新安装流程正在进行。")); return false }
+        if let updater, !updater.canCheckForUpdates { report(L10n.text("更新安装流程正在进行。")); return false }
         approvedVersion = version
-        let updaterController = SPUStandardUpdaterController(startingUpdater: false, updaterDelegate: self, userDriverDelegate: nil)
-        updaterController.updater.automaticallyChecksForUpdates = false
-        updaterController.updater.automaticallyDownloadsUpdates = false
-        updaterController.updater.clearFeedURLFromUserDefaults()
-        controller = updaterController
-        updaterController.startUpdater()
-        updaterController.checkForUpdates(nil)
+        let profile = AppRuntimeProfile.current
+        let driver = LocalizedUpdateUserDriver(language: L10n.language, applicationName: profile.applicationName,
+            applicationNameProvider: { language in L10n.text(profile.isUpdateTest ? "闪传更新测试" : "闪传", language: language) })
+        let newUpdater = SPUUpdater(hostBundle: .main, applicationBundle: .main, userDriver: driver, delegate: self)
+        newUpdater.automaticallyChecksForUpdates = false
+        newUpdater.automaticallyDownloadsUpdates = false
+        newUpdater.clearFeedURLFromUserDefaults()
+        userDriver = driver; updater = newUpdater
+        do { try newUpdater.start() }
+        catch { userDriver = nil; updater = nil; approvedVersion = nil; report(error.localizedDescription); return false }
+        newUpdater.checkForUpdates()
         return true
     }
     func feedURLString(for updater: SPUUpdater) -> String? {

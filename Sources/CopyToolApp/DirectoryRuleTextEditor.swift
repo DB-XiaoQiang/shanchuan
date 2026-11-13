@@ -4,12 +4,14 @@ import SwiftUI
 
 /// 规则文本需要原样保存通配符，并在横向滚动中显示长路径。
 struct DirectoryRuleTextEditor: NSViewRepresentable {
+    @ObservedObject private var appLanguage = AppLanguageStore.shared
     @Binding var text: String
 
     func makeCoordinator() -> Coordinator { Coordinator(text: $text) }
     func makeNSView(context: Context) -> NSScrollView { makeScrollView(coordinator: context.coordinator) }
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
         guard let editor = scrollView.documentView as? RuleTextView else { return }
+        editor.setAccessibilityLabel(L10n.text("目录排除规则文本，每行一条"))
         context.coordinator.update(binding: $text, value: text, editor: editor)
     }
     static func dismantleNSView(_ scrollView: NSScrollView, coordinator: Coordinator) {

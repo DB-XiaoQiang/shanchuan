@@ -28,7 +28,7 @@ public sealed partial class AppViewModel
 
     public void EnqueueText(string content)
     {
-        if (string.IsNullOrEmpty(content)) { StatusMessage = L.T("剪贴板中没有可发送的文本。"); return; }
+        if (string.IsNullOrEmpty(content)) { StatusText = L.M("剪贴板中没有可发送的文本。"); return; }
         Enqueue(new HistoryEntry { Kind = HistoryKind.Text, Content = content, Status = "等待发送" });
     }
 
@@ -39,7 +39,7 @@ public sealed partial class AppViewModel
     {
         var items = paths.Where(path => !string.IsNullOrWhiteSpace(path))
             .Select(Path.GetFullPath).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
-        if (items.Count == 0) { StatusMessage = L.T("没有可发送的文件或文件夹。"); return; }
+        if (items.Count == 0) { StatusText = L.M("没有可发送的文件或文件夹。"); return; }
         Enqueue(new HistoryEntry { Kind = HistoryKind.File, Paths = items, Status = "等待发送" });
     }
 
@@ -47,13 +47,13 @@ public sealed partial class AppViewModel
     {
         if (_updateInstallationPaused)
         {
-            StatusMessage = L.T("正在准备安装更新，请稍候。");
+            StatusText = L.M("正在准备安装更新，请稍候。");
             return;
         }
         try { NetworkPolicy.RequireUpload(Settings); }
         catch (InvalidOperationException error)
         {
-            StatusMessage = error.Message;
+            StatusText = SanitizeError(error);
             AddLog(TransferLogLevel.Warning, L.T("已阻止发送：") + error.Message);
             return;
         }
@@ -63,7 +63,7 @@ public sealed partial class AppViewModel
         lock (_queueSync) _queue.Enqueue(entry);
         QueuedCount = GetQueuedCount();
         _signal.Release();
-        StatusMessage = L.T("已加入发送队列：") + entry.Title;
+        StatusText = L.M("已加入发送队列：") + entry.Title;
         AddLog(TransferLogLevel.Info, L.T("已加入发送队列：") + entry.Title);
     }
 
@@ -91,11 +91,11 @@ public sealed partial class AppViewModel
                     entry.Status = "准备中";
                     RefreshHistory();
                     SaveHistoryAndMedia();
-                    StatusMessage = L.T("正在准备：") + entry.Title;
+                    StatusText = L.M("正在准备：") + entry.Title;
                     AddLog(TransferLogLevel.Info, L.T("开始准备：") + entry.Title);
                 });
                 PublishProgress(new TransferProgressSnapshot(entry.Id, TransferPhase.Preparing,
-                    entry.Title, L.T("正在整理文件并计算校验值"), null, QueuedCount: GetQueuedCount()));
+                    entry.Title, Fraction: null, QueuedCount: GetQueuedCount(), CurrentItemMessage: L.M("正在整理文件并计算校验值")));
 
                 var settings = Settings.Clone();
                 var password = _password;
@@ -106,7 +106,7 @@ public sealed partial class AppViewModel
                 {
                     var total = transfer.Files.Sum(file => new FileInfo(file.LocalPath).Length);
                     PublishProgress(new TransferProgressSnapshot(entry.Id, TransferPhase.Uploading,
-                        entry.Title, L.T("正在上传"), 0, 0, total, GetQueuedCount()));
+                        entry.Title, Fraction: 0, UploadedBytes: 0, TotalBytes: total, QueuedCount: GetQueuedCount(), CurrentItemMessage: L.M("正在上传")));
                     OnUi(() =>
                     {
                         entry.Status = "上传中";
@@ -118,8 +118,8 @@ public sealed partial class AppViewModel
                     var uploadProgress = new Progress<TransferProgressValues>(values =>
                         PublishProgress(new TransferProgressSnapshot(entry.Id,
                             values.Fraction >= 1 ? TransferPhase.Publishing : TransferPhase.Uploading,
-                            entry.Title, values.Fraction >= 1 ? L.T("正在发布控制文件") : L.T("正在上传"),
-                            values.Fraction, values.UploadedBytes, values.TotalBytes, GetQueuedCount())));
+                            entry.Title, Fraction: values.Fraction, UploadedBytes: values.UploadedBytes, TotalBytes: values.TotalBytes,
+                            QueuedCount: GetQueuedCount(), CurrentItemMessage: values.Fraction >= 1 ? L.M("正在发布控制文件") : L.M("正在上传"))));
 
                     await _updateTransferGate.WaitAsync(current.Token).ConfigureAwait(false);
                     try
@@ -132,41 +132,41 @@ public sealed partial class AppViewModel
                 OnUi(() =>
                 {
                     entry.Status = "已发送";
-                    StatusMessage = L.T("发送成功：") + entry.Title;
+                    StatusText = L.M("发送成功：") + entry.Title;
                     RefreshHistory();
                     SaveHistoryAndMedia();
                     var extra = transfer.ExcludedItemCount > 0 ? L.F($"，目录排除 {transfer.ExcludedItemCount} 项") : "";
                     AddLog(TransferLogLevel.Success, L.T("发送成功：") + entry.Title + extra);
                 });
                 PublishProgress(new TransferProgressSnapshot(entry.Id, TransferPhase.Completed,
-                    entry.Title, L.T("发送完成"), 1, Detail: L.T("文件实体与控制文件均已上传")));
+                    entry.Title, Fraction: 1, CurrentItemMessage: L.M("发送完成"), DetailMessage: L.M("文件实体与控制文件均已上传")));
             }
             catch (OperationCanceledException)
             {
                 OnUi(() =>
                 {
                     entry.Status = "已取消";
-                    StatusMessage = L.T("传输已取消");
+                    StatusText = L.M("传输已取消");
                     RefreshHistory();
                     SaveHistoryAndMedia();
                     AddLog(TransferLogLevel.Cancelled, L.T("已取消：") + entry.Title);
                 });
                 PublishProgress(new TransferProgressSnapshot(entry.Id, TransferPhase.Cancelled,
-                    entry.Title, L.T("传输已取消"), Detail: L.T("当前任务和等待队列已停止")));
+                    entry.Title, CurrentItemMessage: L.M("传输已取消"), DetailMessage: L.M("当前任务和等待队列已停止")));
             }
             catch (Exception error)
             {
-                var reason = Sanitize(error.Message);
+                var reason = SanitizeError(error);
                 OnUi(() =>
                 {
                     entry.Status = "发送失败";
-                    StatusMessage = L.T("发送失败：") + reason;
+                    StatusText = L.M("发送失败：") + reason;
                     RefreshHistory();
                     SaveHistoryAndMedia();
                     AddLog(TransferLogLevel.Error, L.T("发送失败：") + entry.Title + "；" + reason);
                 });
                 PublishProgress(new TransferProgressSnapshot(entry.Id, TransferPhase.Failed,
-                    entry.Title, L.T("发送失败"), Detail: reason));
+                    entry.Title, DetailMessage: reason, CurrentItemMessage: L.M("发送失败")));
             }
             finally
             {
@@ -199,12 +199,12 @@ public sealed partial class AppViewModel
                 SaveHistoryAndMedia();
                 AddLog(TransferLogLevel.Cancelled, L.F($"已清空 {waiting.Count} 个等待任务。"));
             }
-            StatusMessage = current is not null ? L.T("正在取消当前传输…") : L.T("等待队列已清空");
+            StatusText = current is not null ? L.M("正在取消当前传输…") : L.M("等待队列已清空");
         });
         if (current is not null)
-            PublishProgress(Progress with { Phase = TransferPhase.Cancelling, CurrentItem = L.T("正在取消"), Detail = L.T("正在停止当前 FTP 会话") });
+            PublishProgress(Progress with { Phase = TransferPhase.Cancelling, CurrentItemMessage = L.M("正在取消"), DetailMessage = L.M("正在停止当前 FTP 会话") });
         else if (waiting.Count > 0)
-            PublishProgress(new TransferProgressSnapshot(Phase: TransferPhase.Cancelled, Title: L.T("传输已取消")));
+            PublishProgress(new TransferProgressSnapshot(Phase: TransferPhase.Cancelled, TitleMessage: L.M("传输已取消")));
         QueuedCount = 0;
     }
 

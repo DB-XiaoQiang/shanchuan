@@ -23,7 +23,7 @@ public sealed class FtpTransferService
         }
         catch (OperationCanceledException error) when (!cancellationToken.IsCancellationRequested)
         {
-            throw new TimeoutException(L.T("连接测试超过 10 秒，请检查服务器地址、端口和网络。"), error);
+            throw L.WithDescription(new TimeoutException(L.T("连接测试超过 10 秒，请检查服务器地址、端口和网络。"), error), L.M("连接测试超过 10 秒，请检查服务器地址、端口和网络。"));
         }
     }
 
@@ -69,6 +69,6 @@ public sealed class FtpTransferService
     private static void Validate(AppSettings settings, string password)
     {
         if (settings.ValidateForTransfer() is { } error) throw new InvalidDataException(error);
-        if (password.Any(char.IsControl)) throw new InvalidDataException(L.T("FTP 密码不能包含控制字符。"));
+        if (password.Any(char.IsControl)) throw L.WithDescription(new InvalidDataException(L.T("FTP 密码不能包含控制字符。")), L.M("FTP 密码不能包含控制字符。"));
     }
 }

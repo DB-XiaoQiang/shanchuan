@@ -18,7 +18,7 @@ import CopyToolCore
             guard let model else { return L10n.text("设置尚未就绪") }
             guard model.saveSettings(preferences: values, password: password) else { return model.settingsError }
             return nil
-        })
+        }, failureOrigin: { [weak model] in model?.settingsErrorSnapshot })
         windowAccess.willClose = { [weak self] in self?.flushAndCancelTest() }
         model.flushSettings = { [weak self] in self?.windowAccess.flushBeforeClose() }
     }

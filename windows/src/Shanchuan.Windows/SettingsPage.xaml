@@ -15,7 +15,7 @@
                 <TextBlock Text="{Binding SettingsStatus}" TextWrapping="Wrap" Foreground="#475467" />
             </StackPanel>
         </Border>
-        <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <ScrollViewer x:Name="SettingsScroll" VerticalScrollBarVisibility="Auto">
             <StackPanel>
                 <Border Background="#FFFFFF" CornerRadius="10" Padding="20" Margin="0,0,0,14">
                     <StackPanel>
@@ -25,7 +25,7 @@
                             <ComboBoxItem Content="简体中文" Tag="zh-Hans" />
                             <ComboBoxItem Content="English" Tag="en" />
                         </ComboBox>
-                        <TextBlock Text="{loc:Tr Key='语言修改会自动保存，重新启动闪传后生效。'}" TextWrapping="Wrap" Foreground="#667085" Margin="0,5,0,0" />
+                        <TextBlock Text="{loc:Tr Key='语言选择后立即生效，并自动保存。'}" TextWrapping="Wrap" Foreground="#667085" Margin="0,5,0,0" />
                     </StackPanel>
                 </Border>
                 <Border Background="#EFF6FF" BorderBrush="#BFDBFE" BorderThickness="1" CornerRadius="10" Padding="20" Margin="0,0,0,14">

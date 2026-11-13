@@ -53,8 +53,10 @@ import OSLog
     }
 
     private struct ShortcutError: LocalizedError {
-        let message: String
-        var errorDescription: String? { message }
+        let origin: L10n.Snapshot
+        init(message: String) { origin = L10n.capture(message) }
+        init(origin: L10n.Snapshot) { self.origin = origin }
+        var errorDescription: String? { origin.rendered }
     }
 
     struct MenuItemMetadata: Equatable {
@@ -99,6 +101,7 @@ import OSLog
     private static let signature: OSType = 0x43545053 // CTPS
     static let syntheticEventMarker: Int64 = 0x43545053434D44
     private let onStatus: (String) -> Void
+    private let onLocalizedStatus: ((L10n.Snapshot) -> Void)?
     private let onCopyReady: (Int) -> Void
     private let logger = Logger(subsystem: "local.copytool.independent", category: "GlobalShortcuts")
     private var handler: EventHandlerRef?
@@ -112,8 +115,10 @@ import OSLog
     private var pendingCommand: Task<Void, Never>?
     private var pendingCommandID: UUID?
 
-    init(onStatus: @escaping (String) -> Void, onCopyReady: @escaping (Int) -> Void = { _ in }) {
+    init(onStatus: @escaping (String) -> Void, onCopyReady: @escaping (Int) -> Void = { _ in },
+         onLocalizedStatus: ((L10n.Snapshot) -> Void)? = nil) {
         self.onStatus = onStatus
+        self.onLocalizedStatus = onLocalizedStatus
         self.onCopyReady = onCopyReady
     }
 
@@ -167,9 +172,9 @@ import OSLog
                     OptionBits(kEventHotKeyExclusive), &reference)
                 guard status == noErr, let reference else {
                     if status == eventHotKeyExistsErr {
-                        throw ShortcutError(message: L10n.format("%@快捷键已被其他应用或系统占用，请换一个组合", action.displayName))
+                        throw ShortcutError(origin: L10n.snapshotCompose("%@快捷键已被其他应用或系统占用，请换一个组合", .snapshot(L10n.snapshot(action.rawValue))))
                     }
-                    throw ShortcutError(message: L10n.format("无法注册%@快捷键（系统错误 %@），请换一个组合", action.displayName, String(describing: status)))
+                    throw ShortcutError(origin: L10n.snapshotCompose("无法注册%@快捷键（系统错误 %@），请换一个组合", .snapshot(L10n.snapshot(action.rawValue)), .literal(String(describing: status))))
                 }
                 let registration = Registration(reference: reference, id: id)
                 acquired.append(registration)
@@ -233,7 +238,7 @@ import OSLog
                 }
             }, eventTypes.count, &eventTypes, Unmanaged.passUnretained(self).toOpaque(), &handler)
             guard status == noErr else {
-                throw ShortcutError(message: L10n.format("无法启动快捷键服务（系统错误 %@）", String(describing: status)))
+                throw ShortcutError(origin: L10n.snapshotFormat("无法启动快捷键服务（系统错误 %@）", String(describing: status)))
             }
         }
         if localMonitor == nil {
@@ -282,7 +287,7 @@ import OSLog
         guard let originalPID = releases.release(id: id) else { return }
         guard let action = actions[id] else { return }
         guard NSWorkspace.shared.frontmostApplication?.processIdentifier == originalPID else {
-            reportNotPerformed(L10n.text("快捷键已取消：按键期间前台应用已切换"), action: action, target: nil)
+            reportNotPerformed(L10n.snapshot("快捷键已取消：按键期间前台应用已切换"), action: action, target: nil)
             return
         }
         perform(action)
@@ -291,13 +296,13 @@ import OSLog
     private func perform(_ action: Action) {
         guard pendingCommand == nil, !recordingShortcut else {
             logger.notice("Shortcut skipped: command pending or shortcut recording active")
-            reportNotPerformed(L10n.format("%@操作未执行：请等待当前操作或录制结束", action.displayName), action: action, target: nil)
+            reportNotPerformed(L10n.snapshotCompose("%@操作未执行：请等待当前操作或录制结束", .snapshot(L10n.snapshot(action.rawValue))), action: action, target: nil)
             return
         }
         let requestInputCounters = Self.newInputCounters()
         guard let target = NSWorkspace.shared.frontmostApplication, !target.isTerminated else {
             logger.notice("Shortcut cancelled: no running frontmost application")
-            reportNotPerformed(L10n.format("%@操作已取消：没有可用的前台应用", action.displayName), action: action, target: nil)
+            reportNotPerformed(L10n.snapshotCompose("%@操作已取消：没有可用的前台应用", .snapshot(L10n.snapshot(action.rawValue))), action: action, target: nil)
             return
         }
         let pid = target.processIdentifier
@@ -309,7 +314,7 @@ import OSLog
         logger.info("Permission preflight: AXIsProcessTrusted=\(accessibilityTrusted, privacy: .public) CGPreflightPostEventAccess=\(postEventAccess, privacy: .public)")
         guard isLocal || accessibilityTrusted else {
             logger.error("Shortcut denied: Accessibility permission missing; pid=\(pid, privacy: .public)")
-            reportNotPerformed(L10n.format("%@快捷键未执行：请在系统设置的辅助功能中允许闪传", action.displayName), action: action, target: target)
+            reportNotPerformed(L10n.snapshotCompose("%@快捷键未执行：请在系统设置的辅助功能中允许闪传", .snapshot(L10n.snapshot(action.rawValue))), action: action, target: target)
             return
         }
         let commandID = UUID()
@@ -328,30 +333,30 @@ import OSLog
             for _ in 0..<120 {
                 guard !Task.isCancelled, !self.recordingShortcut else {
                     self.logger.info("Shortcut cancelled before dispatch: task cancelled or recorder active; pid=\(pid, privacy: .public)")
-                    self.reportNotPerformed(L10n.format("%@操作已取消", action.displayName), action: action, target: target)
+                    self.reportNotPerformed(L10n.snapshotCompose("%@操作已取消", .snapshot(L10n.snapshot(action.rawValue))), action: action, target: target)
                     return
                 }
                 guard NSWorkspace.shared.frontmostApplication?.processIdentifier == pid, !target.isTerminated else {
                     self.logger.notice("Shortcut cancelled: frontmost application changed or target terminated; pid=\(pid, privacy: .public)")
-                    self.reportNotPerformed(L10n.format("%@快捷键已取消：前台应用已切换", action.displayName), action: action, target: target)
+                    self.reportNotPerformed(L10n.snapshotCompose("%@快捷键已取消：前台应用已切换", .snapshot(L10n.snapshot(action.rawValue))), action: action, target: target)
                     return
                 }
                 if CGEventSource.flagsState(.hidSystemState).intersection(modifiers).isEmpty { break }
                 do { try await Task.sleep(nanoseconds: 25_000_000) } catch {
                     self.logger.info("Shortcut cancelled while waiting for modifier release; pid=\(pid, privacy: .public)")
-                    self.reportNotPerformed(L10n.format("%@操作已取消", action.displayName), action: action, target: target)
+                    self.reportNotPerformed(L10n.snapshotCompose("%@操作已取消", .snapshot(L10n.snapshot(action.rawValue))), action: action, target: target)
                     return
                 }
             }
             guard CGEventSource.flagsState(.hidSystemState).intersection(modifiers).isEmpty else {
                 self.logger.notice("Shortcut cancelled: modifier release timeout; pid=\(pid, privacy: .public)")
-                self.reportNotPerformed(L10n.format("%@快捷键已取消：请松开修饰键后重试", action.displayName), action: action, target: target)
+                self.reportNotPerformed(L10n.snapshotCompose("%@快捷键已取消：请松开修饰键后重试", .snapshot(L10n.snapshot(action.rawValue))), action: action, target: target)
                 return
             }
             guard !Task.isCancelled, !self.recordingShortcut,
                   NSWorkspace.shared.frontmostApplication?.processIdentifier == pid, !target.isTerminated else {
                 self.logger.notice("Shortcut cancelled at final dispatch check; pid=\(pid, privacy: .public)")
-                self.reportNotPerformed(L10n.format("%@快捷键已取消：目标或录制状态已改变", action.displayName), action: action, target: target)
+                self.reportNotPerformed(L10n.snapshotCompose("%@快捷键已取消：目标或录制状态已改变", .snapshot(L10n.snapshot(action.rawValue))), action: action, target: target)
                 return
             }
             guard Self.newInputCounters() == requestInputCounters else {
@@ -359,14 +364,14 @@ import OSLog
                 let initialCounters = requestInputCounters.description
                 self.logger.notice("Shortcut input counters changed: initial=\(initialCounters, privacy: .public) observed=\(observedCounters, privacy: .public)")
                 self.logger.notice("Shortcut cancelled: new physical operation while waiting for modifier release")
-                self.reportNotPerformed(L10n.text("等待快捷键释放期间检测到新的操作"), action: action, target: target)
+                self.reportNotPerformed(L10n.snapshot("等待快捷键释放期间检测到新的操作"), action: action, target: target)
                 return
             }
             if isLocal {
                 let selector = NSSelectorFromString(action == .copy ? "copy:" : "paste:")
                 let copyBaseline = action == .copy ? Self.captureCopyDispatchBaseline() : nil
                 guard (copyBaseline?.inputCounters ?? Self.newInputCounters()) == requestInputCounters else {
-                    self.reportNotPerformed(L10n.text("复制前检测到新的操作"), action: action, target: target)
+                    self.reportNotPerformed(L10n.snapshot("复制前检测到新的操作"), action: action, target: target)
                     return
                 }
                 let handled = NSApp.sendAction(selector, to: nil, from: self)
@@ -374,9 +379,9 @@ import OSLog
                 if handled && action == .copy {
                     await self.confirmCopyReady(baseline: copyBaseline, target: target, commandID: commandID)
                 } else if handled {
-                    self.report(L10n.format("已向当前输入框发送%@操作", action.displayName), target: target)
+                    self.report(L10n.snapshotCompose("已向当前输入框发送%@操作", .snapshot(L10n.snapshot(action.rawValue))), target: target)
                 } else {
-                    self.reportNotPerformed(L10n.format("当前控件不支持%@操作", action.displayName), action: action, target: target)
+                    self.reportNotPerformed(L10n.snapshotCompose("当前控件不支持%@操作", .snapshot(L10n.snapshot(action.rawValue))), action: action, target: target)
                 }
                 return
             }
@@ -385,7 +390,7 @@ import OSLog
             self.logger.info("Permission dispatch check: AXIsProcessTrusted=\(accessibilityTrusted, privacy: .public) CGPreflightPostEventAccess=\(postEventAccess, privacy: .public)")
             guard accessibilityTrusted else {
                 self.logger.error("Shortcut denied at dispatch: Accessibility permission missing; pid=\(pid, privacy: .public)")
-                self.reportNotPerformed(L10n.format("%@快捷键未执行：辅助功能权限未授权", action.displayName), action: action, target: target)
+                self.reportNotPerformed(L10n.snapshotCompose("%@快捷键未执行：辅助功能权限未授权", .snapshot(L10n.snapshot(action.rawValue))), action: action, target: target)
                 return
             }
             self.logger.info("Accessibility permission confirmed; pid=\(pid, privacy: .public)")
@@ -404,14 +409,14 @@ import OSLog
                 if action == .copy {
                     await self.confirmCopyReady(baseline: menuCopyBaseline, target: target, commandID: commandID)
                 } else {
-                    self.report(L10n.format("已执行%@操作", action.displayName), target: target)
+                    self.report(L10n.snapshotCompose("已执行%@操作", .snapshot(L10n.snapshot(action.rawValue))), target: target)
                 }
                 return
             case .uncertain:
-                self.reportNotPerformed(L10n.format("%@操作未能确认，已停止以避免重复执行", action.displayName), action: action, target: target)
+                self.reportNotPerformed(L10n.snapshotCompose("%@操作未能确认，已停止以避免重复执行", .snapshot(L10n.snapshot(action.rawValue))), action: action, target: target)
                 return
             case .disabled:
-                self.reportNotPerformed(L10n.format("当前内容不可%@", action.displayName), action: action, target: target)
+                self.reportNotPerformed(L10n.snapshotCompose("当前内容不可%@", .snapshot(L10n.snapshot(action.rawValue))), action: action, target: target)
                 return
             case .definitelyNotPerformed:
                 break
@@ -420,26 +425,26 @@ import OSLog
                   NSWorkspace.shared.frontmostApplication?.processIdentifier == pid, !target.isTerminated,
                   CGEventSource.flagsState(.hidSystemState).intersection(modifiers).isEmpty else {
                 self.logger.notice("Keyboard fallback cancelled: target, permission, modifiers or recording changed; pid=\(pid, privacy: .public)")
-                self.reportNotPerformed(L10n.format("%@操作已取消：目标或授权状态已改变", action.displayName), action: action, target: target)
+                self.reportNotPerformed(L10n.snapshotCompose("%@操作已取消：目标或授权状态已改变", .snapshot(L10n.snapshot(action.rawValue))), action: action, target: target)
                 return
             }
             guard CGPreflightPostEventAccess() else {
                 self.logger.error("Keyboard fallback denied: event posting permission missing; pid=\(pid, privacy: .public)")
-                self.reportNotPerformed(L10n.format("%@操作未执行：系统尚未允许发送按键", action.displayName), action: action, target: target)
+                self.reportNotPerformed(L10n.snapshotCompose("%@操作未执行：系统尚未允许发送按键", .snapshot(L10n.snapshot(action.rawValue))), action: action, target: target)
                 return
             }
             guard let events = Self.makeCommandEvents(keyCode: action.commandKeyCode) else {
                 self.logger.error("Shortcut failed: could not construct command events; pid=\(pid, privacy: .public)")
-                self.reportNotPerformed(L10n.format("无法生成%@按键，请重试", action.displayName), action: action, target: target)
+                self.reportNotPerformed(L10n.snapshotCompose("无法生成%@按键，请重试", .snapshot(L10n.snapshot(action.rawValue))), action: action, target: target)
                 return
             }
             guard Self.newInputCounters() == requestInputCounters else {
-                self.reportNotPerformed(L10n.text("发送按键前检测到新的操作"), action: action, target: target)
+                self.reportNotPerformed(L10n.snapshot("发送按键前检测到新的操作"), action: action, target: target)
                 return
             }
             let keyboardCopyBaseline = action == .copy ? Self.captureCopyDispatchBaseline() : nil
             guard (keyboardCopyBaseline?.inputCounters ?? Self.newInputCounters()) == requestInputCounters else {
-                self.reportNotPerformed(L10n.text("发送按键前检测到新的操作"), action: action, target: target)
+                self.reportNotPerformed(L10n.snapshot("发送按键前检测到新的操作"), action: action, target: target)
                 return
             }
             for event in events { event.postToPid(pid) }
@@ -449,7 +454,7 @@ import OSLog
             if action == .copy {
                 await self.confirmCopyReady(baseline: keyboardCopyBaseline, target: target, commandID: commandID)
             } else {
-                self.report(L10n.format("已发送%@按键", action.displayName), target: target)
+                self.report(L10n.snapshotCompose("已发送%@按键", .snapshot(L10n.snapshot(action.rawValue))), target: target)
             }
         }
     }
@@ -655,46 +660,48 @@ import OSLog
                       pendingCommandID == commandID, !target.isTerminated,
                       NSWorkspace.shared.frontmostApplication?.processIdentifier == target.processIdentifier,
                       baseline?.inputCounters == Self.newInputCounters() else {
-                    reportNotPerformed(L10n.text("复制确认已取消"), action: .copy, target: target)
+                    reportNotPerformed(L10n.snapshot("复制确认已取消"), action: .copy, target: target)
                     return
                 }
                 logger.info("Copy clipboard update confirmed within protected input window; notifying send flow once; pid=\(target.processIdentifier, privacy: .public)")
                 onCopyReady(observedCount)
-                report(L10n.text("已确认复制，已交给发送流程"), target: target)
+                report(L10n.snapshot("已确认复制，已交给发送流程"), target: target)
                 return
             case .cancelled:
                 logger.notice("Explicit copy send cancelled: task or frontmost target changed")
-                reportNotPerformed(L10n.text("复制确认已取消"), action: .copy, target: target)
+                reportNotPerformed(L10n.snapshot("复制确认已取消"), action: .copy, target: target)
                 return
             case .inputChanged:
                 logger.notice("Explicit copy send cancelled: new physical input inside protected confirmation window")
-                reportNotPerformed(L10n.text("复制期间检测到新的操作"), action: .copy, target: target)
+                reportNotPerformed(L10n.snapshot("复制期间检测到新的操作"), action: .copy, target: target)
                 return
             case .notCopy, .notDispatched:
-                reportNotPerformed(L10n.text("复制操作未能确认"), action: .copy, target: target)
+                reportNotPerformed(L10n.snapshot("复制操作未能确认"), action: .copy, target: target)
                 return
             case .expired:
-                report(L10n.text("复制确认超时，未发送"), target: target)
+                report(L10n.snapshot("复制确认超时，未发送"), target: target)
                 return
             case .unchanged:
                 break
             }
             do { try await Task.sleep(nanoseconds: 25_000_000) } catch {
-                reportNotPerformed(L10n.text("复制确认已取消"), action: .copy, target: target)
+                reportNotPerformed(L10n.snapshot("复制确认已取消"), action: .copy, target: target)
                 return
             }
         }
         logger.notice("Dispatched copy produced no confirmed update within protected one-second window; no send")
-        report(L10n.text("剪贴板未更新，未发送"), target: target)
+        report(L10n.snapshot("剪贴板未更新，未发送"), target: target)
     }
 
-    private func reportNotPerformed(_ text: String, action: Action, target: NSRunningApplication?) {
-        report(text + (action == .copy ? L10n.text("，未发送") : ""), target: target)
+    private func reportNotPerformed(_ text: L10n.Snapshot, action: Action, target: NSRunningApplication?) {
+        report(action == .copy ? text.appending(L10n.snapshot("，未发送")) : text, target: target)
     }
 
-    private func report(_ text: String, target: NSRunningApplication?) {
-        let time = L10n.date(Date(), date: .omitted, time: .standard)
-        onStatus(L10n.format("%@ · %@ · %@", String(describing: time), String(describing: target?.localizedName ?? L10n.text("前台应用")), String(describing: text)))
+    private func report(_ text: L10n.Snapshot, target: NSRunningApplication?) {
+        let appName = target?.localizedName.map(L10n.Snapshot.verbatim) ?? L10n.snapshot("前台应用")
+        let origin = L10n.snapshotCompose("%@ · %@ · %@", .time(Date()), .snapshot(appName), .snapshot(text))
+        if let onLocalizedStatus { onLocalizedStatus(origin) }
+        else { onStatus(origin.rendered) }
     }
 
     private func cancelPendingCommand() {

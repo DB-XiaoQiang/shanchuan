@@ -3,10 +3,12 @@ import SwiftUI
 import CopyToolCore
 
 struct ShortcutSettingsView: View {
+    @ObservedObject private var appLanguage = AppLanguageStore.shared
     @ObservedObject var model: AppModel
     @State private var draft = CopyPasteShortcuts()
-    @State private var autosaveStatus = ""
+    @State private var autosaveStatus = L10n.Snapshot.verbatim("")
     var body: some View {
+        let _ = appLanguage.language
         VStack(alignment: .leading, spacing: 10) {
             Toggle(L10n.text("启用复制发送 / 粘贴快捷键"), isOn: Binding(
                 get: { draft.enabled },
@@ -45,10 +47,10 @@ struct ShortcutSettingsView: View {
             }
             if let error = validationError { Text(L10n.text("未保存：") + error).font(.caption).foregroundStyle(.red) }
             else if !model.shortcutSettingsError.isEmpty { Text(L10n.text("未保存：") + model.shortcutSettingsError).font(.caption).foregroundStyle(.red) }
-            else if !autosaveStatus.isEmpty { Text(autosaveStatus).font(.caption).foregroundStyle(.secondary) }
+            else if !autosaveStatus.rendered.isEmpty { Text(autosaveStatus.rendered).font(.caption).foregroundStyle(.secondary) }
             if !model.shortcutStatus.isEmpty { Text(model.shortcutStatus).font(.caption).foregroundStyle(.secondary) }
         }
-        .onAppear { draft = model.preferences.shortcuts; autosaveStatus = ""; model.refreshShortcutPermission() }
+        .onAppear { draft = model.preferences.shortcuts; autosaveStatus = .verbatim(""); model.refreshShortcutPermission() }
         .onChange(of: model.preferences.shortcuts) { draft = $0 }
         .onDisappear { model.setShortcutRecording(false) }
     }
@@ -69,19 +71,21 @@ struct ShortcutSettingsView: View {
     }
 
     private func saveDraft(validateBindings: Bool = true) {
-        autosaveStatus = ""
+        autosaveStatus = .verbatim("")
         guard !validateBindings || validationError == nil else { return }
         if draft == model.preferences.shortcuts || model.saveShortcutConfiguration(draft) {
-            autosaveStatus = L10n.text("快捷键已保存")
+            autosaveStatus = L10n.snapshot("快捷键已保存")
         }
     }
 }
 
 private struct ShortcutRecorderRow: View {
+    @ObservedObject private var appLanguage = AppLanguageStore.shared
     let title: String
     @Binding var binding: ShortcutBinding
     let recordingChanged: (Bool) -> Void
     var body: some View {
+        let _ = appLanguage.language
         HStack {
             Text(title).frame(width: 190, alignment: .leading)
             ShortcutRecorder(binding: $binding, title: title, recordingChanged: recordingChanged)

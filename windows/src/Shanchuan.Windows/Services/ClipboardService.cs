@@ -34,7 +34,7 @@ public static class ClipboardService
         if (clipboardChanged)
             throw new InvalidDataException(L.T("目标应用已更新剪贴板，但读取失败。请关闭可能占用剪贴板的工具后重试。") +
                 (string.IsNullOrWhiteSpace(readError) ? "" : L.T("原因：") + readError));
-        throw new InvalidDataException(L.T("等待 5 秒后仍未捕获到新的复制内容。请确认前方应用中有选中的文本、图片或文件，并检查目标应用是否响应 Ctrl+C。"));
+        throw L.WithDescription(new InvalidDataException(L.T("等待 5 秒后仍未捕获到新的复制内容。请确认前方应用中有选中的文本、图片或文件，并检查目标应用是否响应 Ctrl+C。")), L.M("等待 5 秒后仍未捕获到新的复制内容。请确认前方应用中有选中的文本、图片或文件，并检查目标应用是否响应 Ctrl+C。"));
     }
 
     private static bool TryRead(Func<string> newImagePath, out CapturedClipboard captured, out string? error)

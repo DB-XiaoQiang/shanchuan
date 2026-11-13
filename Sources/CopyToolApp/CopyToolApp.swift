@@ -11,6 +11,7 @@ import AppKit
 }
 
 struct CopyToolApp: App {
+    @StateObject private var appLanguage = AppLanguageStore.shared
     @NSApplicationDelegateAdaptor(AppDelegate.self) var delegate
     private let runtimeProfile: AppRuntimeProfile
     @StateObject private var model: AppModel
@@ -29,7 +30,7 @@ struct CopyToolApp: App {
     var body: some Scene {
         Window(runtimeProfile.applicationName, id: "main") {
             RootView(model: model, updates: updates, navigation: navigation, settings: settings)
-                .environment(\.locale, L10n.language.locale)
+                .environment(\.locale, appLanguage.language.locale)
                 .frame(minWidth: 820, minHeight: 560)
                 .onAppear {
                     if model.allowsBusinessTransfers { delegate.connectTransferProgress(model) }
@@ -43,12 +44,13 @@ struct CopyToolApp: App {
                             username: model.preferences.username, password: model.password, directory: model.preferences.directory)
                     }
                     updates.install = { runtimeProfile.updatesEnabled && updater.install(version: $0) }
-                    updates.writeLog = { text, error in model.log(text, level: error ? .warning : .info) }
+                    updates.writeLocalizedLog = { source, error in model.logLocalized(source, level: error ? .warning : .info) }
                     updater.isTransferActive = { model.transferSnapshot.isActive || model.queued > 0 || updates.isRelaying }
                     updater.setInstallationCommitting = { model.updateInstallationIsCommitting = $0 }
                     updater.cycleFinished = { updates.installationCycleFinished(error: $0) }
                     updater.report = { model.log($0, level: .warning) }
                     if runtimeProfile.updatesEnabled { updates.start() }
+                    DispatchQueue.main.async { NativeMenuLocalizer.refresh() }
                 }
         }.defaultSize(width: 1000, height: 720)
         .commands {
@@ -69,10 +71,12 @@ struct CopyToolApp: App {
     }
 }
 struct UpdateCommands: Commands {
+    @ObservedObject private var appLanguage = AppLanguageStore.shared
     @ObservedObject var updates: UpdateCoordinator
     var enabled = true
     @Environment(\.openWindow) private var openWindow
     var body: some Commands {
+        let _ = appLanguage.language
         CommandGroup(after: .appInfo) {
             Button(L10n.text("检查更新…")) {
                 guard enabled else { return }
@@ -119,10 +123,12 @@ struct UpdateCommands: Commands {
     }
 }
 struct MenuContents: View {
+    @ObservedObject private var appLanguage = AppLanguageStore.shared
     @ObservedObject var model: AppModel
     @ObservedObject var navigation: AppNavigation
     @Environment(\.openWindow) private var openWindow
     var body: some View {
+        let _ = appLanguage.language
         Button(L10n.text("显示窗口")) { openWindow(id: "main"); NSApp.activate(ignoringOtherApps: true) }
         Button(L10n.text("配置中心")) {
             navigation.select(.settings)

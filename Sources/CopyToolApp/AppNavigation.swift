@@ -32,9 +32,11 @@ import SwiftUI
 }
 
 struct AppNavigationCommands: Commands {
+    @ObservedObject private var appLanguage = AppLanguageStore.shared
     @ObservedObject var navigation: AppNavigation
     @Environment(\.openWindow) private var openWindow
     var body: some Commands {
+        let _ = appLanguage.language
         CommandGroup(replacing: .appSettings) {
             Button(L10n.text("配置中心…")) {
                 navigation.select(.settings)

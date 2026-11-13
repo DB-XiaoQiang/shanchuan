@@ -4,11 +4,13 @@ import SwiftUI
 
 /// 图标由打包脚本放入主 bundle，侧栏与使用说明复用同一品牌资源。
 struct AppLogo: View {
+    @ObservedObject private var appLanguage = AppLanguageStore.shared
     let size: CGFloat
     private static let image: NSImage? = Bundle.main.url(forResource: "AppIcon", withExtension: "png")
         .flatMap { NSImage(contentsOf: $0) }
 
     var body: some View {
+        let _ = appLanguage.language
         Group {
             if let image = Self.image {
                 Image(nsImage: image).resizable().interpolation(.high).scaledToFit()

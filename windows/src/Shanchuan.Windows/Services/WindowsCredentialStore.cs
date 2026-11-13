@@ -23,7 +23,7 @@ public sealed class WindowsCredentialStore : ICredentialStore
         if (!CredRead(Target, CredTypeGeneric, 0, out var pointer))
         {
             var error = Marshal.GetLastWin32Error();
-            return error == 1168 ? null : throw new Win32Exception(error, L.T("无法读取 Windows 凭据管理器。"));
+            return error == 1168 ? null : throw L.WithDescription(new Win32Exception(error, L.T("无法读取 Windows 凭据管理器。")), L.M("无法读取 Windows 凭据管理器。"));
         }
         try
         {
@@ -50,7 +50,7 @@ public sealed class WindowsCredentialStore : ICredentialStore
                 Persist = CredPersistLocalMachine,
                 UserName = "FTP"
             };
-            if (!CredWrite(ref credential, 0)) throw new Win32Exception(Marshal.GetLastWin32Error(), L.T("无法保存到 Windows 凭据管理器。"));
+            if (!CredWrite(ref credential, 0)) throw L.WithDescription(new Win32Exception(Marshal.GetLastWin32Error(), L.T("无法保存到 Windows 凭据管理器。")), L.M("无法保存到 Windows 凭据管理器。"));
         }
         finally { Marshal.FreeHGlobal(buffer); }
     }
@@ -60,7 +60,7 @@ public sealed class WindowsCredentialStore : ICredentialStore
         if (!CredDelete(Target, CredTypeGeneric, 0))
         {
             var error = Marshal.GetLastWin32Error();
-            if (error != 1168) throw new Win32Exception(error, L.T("无法删除已保存的 FTP 密码。"));
+            if (error != 1168) throw L.WithDescription(new Win32Exception(error, L.T("无法删除已保存的 FTP 密码。")), L.M("无法删除已保存的 FTP 密码。"));
         }
     }
 

@@ -15,7 +15,7 @@ public sealed class DirectoryExclusions
     {
         text ??= "";
         if (Encoding.UTF8.GetByteCount(text) > 65_536)
-            throw new ArgumentException(L.T("目录排除规则过长，请控制在 64 KB 内。"));
+            throw L.WithDescription(new ArgumentException(L.T("目录排除规则过长，请控制在 64 KB 内。")), L.M("目录排除规则过长，请控制在 64 KB 内。"));
 
         var rules = new List<Rule>();
         var lines = text.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
@@ -39,7 +39,7 @@ public sealed class DirectoryExclusions
                 throw Error(index, L.T("请填写有效的相对路径，不能包含 . 或 .. 路径段"));
 
             rules.Add(new Rule(components, directoriesOnly, !anchored && components.Length == 1));
-            if (rules.Count > 200) throw new ArgumentException(L.T("目录排除规则最多支持 200 条。"));
+            if (rules.Count > 200) throw L.WithDescription(new ArgumentException(L.T("目录排除规则最多支持 200 条。")), L.M("目录排除规则最多支持 200 条。"));
         }
         return new DirectoryExclusions(rules);
     }

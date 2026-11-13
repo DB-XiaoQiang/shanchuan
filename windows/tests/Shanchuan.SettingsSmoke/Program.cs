@@ -69,7 +69,7 @@ internal static class Program
                 RunAssertions(application, window, viewModel, settingsStore, credentials, output);
                 RunDirectoryRulesAssertions(application, window, viewModel, settingsStore, output);
                 await RunUpdateFeedbackAssertionsAsync(application, window, viewModel, dataRoot);
-                RunLanguageAssertions(application, window, viewModel, settingsStore, output);
+                RunLanguageAssertions(application, window, viewModel, settingsStore, credentials, output);
                 File.WriteAllText(Path.Combine(output, "settings-smoke-report.json"), JsonSerializer.Serialize(new
                 {
                     passed = true,
@@ -193,66 +193,109 @@ internal static class Program
             .Replace("clr-namespace:Shanchuan.Windows", "clr-namespace:Shanchuan.Windows;assembly=Shanchuan", StringComparison.Ordinal));
     }
 
-    private static void RunLanguageAssertions(Application application, MainWindow chineseWindow,
-        AppViewModel chineseViewModel, SettingsStore chineseStore, string output)
+    private static void RunLanguageAssertions(Application application, MainWindow window,
+        AppViewModel viewModel, SettingsStore store, FakeCredentials credentials, string output)
     {
-        Check(Localization.CurrentLanguage == "zh-Hans" && chineseWindow.Title == "闪传", "chinese-default-independent-of-os-language");
-        AssertUpdateDialog(application, chineseWindow, "闪传更新", "更新并重启", "稍后");
-        Click(chineseWindow, "SettingsNav");
-        var chinesePage = Find<SettingsPage>(chineseWindow, "SettingsPageRoot");
-        var choice = Find<ComboBox>(chinesePage, "SettingLanguage");
+        Check(Localization.CurrentLanguage == "zh-Hans" && window.Title == "闪传", "chinese-default-independent-of-os-language");
+        AssertUpdateDialog(application, window, "闪传更新", "更新并重启", "稍后");
+        Click(window, "SettingsNav");
+        var page = Find<SettingsPage>(window, "SettingsPageRoot");
+        var choice = Find<ComboBox>(page, "SettingLanguage");
         Check((string)choice.SelectedValue == "zh-Hans", "default-language-choice-is-simplified-chinese");
-        choice.SelectedValue = "en";
+        var settings = viewModel.Settings;
+        var savedHost = store.Load().Host;
+        var host = Find<TextBox>(page, "SettingHost");
+        var port = Find<TextBox>(page, "SettingPort");
+        var originalPort = port.Text;
+        host.SetCurrentValue(TextBox.TextProperty, "unsaved-draft.example.invalid");
+        host.Select(3, 7);
+        port.SetCurrentValue(TextBox.TextProperty, "invalid-number-draft");
         Pump();
-        Check(chineseWindow.TrySaveSettingsBeforeClose() && chineseStore.Load().Language == "en", "language-choice-saved-with-regular-settings");
-        Check(Localization.CurrentLanguage == "zh-Hans" && chineseWindow.Title == "闪传", "language-change-waits-for-restart");
+        Check(Validation.GetHasError(port), "runtime-language-fixture-keeps-invalid-numeric-draft");
+        var password = Find<PasswordBox>(page, "SettingPassword").Password;
 
-        var root = Path.Combine(output, "english-fixture");
-        Directory.CreateDirectory(root);
-        var store = new SettingsStore(root);
-        var credentials = new FakeCredentials();
-        var settings = new AppSettings { Language = "en", Host = "english.example.invalid", Username = "synthetic-user" };
-        store.Save(settings);
-        Localization.Configure(store.Load().Language);
-        LoadProductionStyles(application);
-        using var viewModel = new AppViewModel(settings, "synthetic-password", store, new HistoryStore(root),
-            new TransferLogStore(root), credentials, new FtpTransferService(), new FtpReceiveService(new ReceiveStateStore(root)), [], []);
-        viewModel.InitializeUpdates(root);
-        var englishWindow = new MainWindow(viewModel) { Width = 1080, Height = 800 };
+        // Use synthetic presentation state only: no clipboard, FTP worker,
+        // credential API, global hotkey or real upload is started.
+        var history = (List<HistoryEntry>)typeof(AppViewModel).GetField("_history", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(viewModel)!;
+        history.Add(new HistoryEntry { Kind = HistoryKind.Text, Content = "就绪", Status = "仅本地" });
+        viewModel.SearchText = "就绪";
+        viewModel.KindFilter = "文本";
+        var selected = viewModel.HistoryRows.Single();
+        viewModel.SelectedHistory = selected;
+        viewModel.Logs.Add(new TransferLogEntry { Level = TransferLogLevel.Warning, Message = "就绪" });
+        viewModel.ReportHotkeyError("就绪");
+        var logs = viewModel.Logs.Select(x => x.Message).ToArray();
+        var progress = new TransferProgressSnapshot(Guid.NewGuid(), TransferPhase.Uploading, "就绪", Fraction: .25,
+            UploadedBytes: 25, TotalBytes: 100, QueuedCount: 3, CurrentItemMessage: Localization.M("正在上传"));
+        var progressWindow = new ProgressWindow(viewModel);
+        typeof(AppViewModel).GetProperty(nameof(AppViewModel.Progress))!.SetValue(viewModel, progress);
+        var captureFlag = typeof(AppViewModel).GetField("_copyCaptureInProgress", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        captureFlag.SetValue(viewModel, 1);
+        Click(window, "OpenDirectoryRules");
+        var editor = application.Windows.OfType<DirectoryRulesWindow>().Single();
+        var rules = Find<TextBox>(editor, "DirectoryRulesEditor");
+        var draftRules = string.Join(Environment.NewLine, Enumerable.Range(1, 140).Select(i => $"synthetic-directory-{i}/"));
+        rules.SetCurrentValue(TextBox.TextProperty, draftRules);
+        rules.Select(20, 12);
+        rules.ScrollToLine(60);
+        var scroll = (ScrollViewer)page.FindName("SettingsScroll");
+        scroll.ScrollToVerticalOffset(105);
+        Pump();
+        var ruleOffset = rules.VerticalOffset;
+        var pageOffset = scroll.VerticalOffset;
+        var hostSelection = (host.SelectionStart, host.SelectionLength);
+        var credentialWrites = credentials.SaveCount;
+        var transferGate = viewModel.UpdateTransferGate;
+        var gateCount = transferGate.CurrentCount;
+        var receiveSignal = (System.Threading.SemaphoreSlim)typeof(AppViewModel).GetField("_receiveSignal", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(viewModel)!;
+        var receiveSignalCount = receiveSignal.CurrentCount;
+        var settingsEvents = 0;
+        void Applied(object? sender, EventArgs e) => settingsEvents++;
+        viewModel.SettingsApplied += Applied;
         try
         {
-            englishWindow.Show();
-            Pump();
-            Check(englishWindow.Title == "Shanchuan" && Title(englishWindow) == "Clipboard history", "english-main-window-and-navigation-loaded");
-            Check(Find<Button>(englishWindow, "SettingsNav").Content as string == "Settings", "english-xaml-resource-lookup");
-            Check(Find<Button>(englishWindow, "CheckUpdates").Content as string == "Check for updates / Retry", "english-update-button");
-            AssertUpdateDialog(application, englishWindow, "Shanchuan update", "Update and restart", "Later");
-            Click(englishWindow, "SettingsNav");
-            var page = Find<SettingsPage>(englishWindow, "SettingsPageRoot");
-            Check((string)Find<ComboBox>(page, "SettingLanguage").SelectedValue == "en", "english-language-choice-restored-after-restart");
-            Check(Title(englishWindow) == "Settings" && viewModel.NetworkStatus == "Network location not configured", "english-settings-and-runtime-status");
-            Check(new HistoryRow(new HistoryEntry { Status = "等待发送" }, false).Status == "Queued", "english-history-status-with-stable-storage-code");
-            Check(new LocalizedValueConverter().Convert(TransferLogLevel.Warning, typeof(string), null!, System.Globalization.CultureInfo.CurrentCulture) as string == "Warning", "english-log-level-converter");
-            Capture(englishWindow, Path.Combine(output, "settings-page-english.png"));
-            Click(englishWindow, "OpenDirectoryRules");
-            var editor = application.Windows.OfType<DirectoryRulesWindow>().Single();
-            Check(editor.Title == "Directory exclusion rules", "english-rules-editor-title");
-            Check(Find<Button>(editor, "CompleteDirectoryRules").Content as string == "Done", "english-rules-editor-action");
-            Capture(editor, Path.Combine(output, "directory-rules-editor-english.png"));
-            Click(editor, "CompleteDirectoryRules");
+            foreach (var language in new[] { "en", "zh-Hans" })
+            {
+                choice.SelectedValue = language;
+                Pump();
+                var english = language == "en";
+                Check(Localization.CurrentLanguage == language && window.Title == (english ? "Shanchuan" : "闪传"), "runtime-window-title-" + language);
+                Check(Title(window) == (english ? "Settings" : "配置中心"), "runtime-page-title-" + language);
+                Check(ReferenceEquals(page, Find<SettingsPage>(window, "SettingsPageRoot")) && ReferenceEquals(page.DataContext, viewModel) && ReferenceEquals(settings, viewModel.Settings), "runtime-same-page-model-and-settings-" + language);
+                Check(Find<Button>(window, "CheckUpdates").Content as string == (english ? "Check for updates / Retry" : "检查更新 / 重试"), "runtime-update-button-" + language);
+                Check(editor.Title == (english ? "Directory exclusion rules" : "目录排除规则") && Find<Button>(editor, "CompleteDirectoryRules").Content as string == (english ? "Done" : "完成"), "runtime-existing-rules-window-" + language);
+                Check(rules.Text == draftRules && rules.SelectionStart == 20 && rules.SelectionLength == 12 && Math.Abs(rules.VerticalOffset - ruleOffset) < 1, "runtime-rules-text-selection-and-scroll-preserved-" + language);
+                Check(host.Text == "unsaved-draft.example.invalid" && (host.SelectionStart, host.SelectionLength) == hostSelection && port.Text == "invalid-number-draft" && Validation.GetHasError(port), "runtime-invalid-input-and-selection-preserved-" + language);
+                Check(Math.Abs(scroll.VerticalOffset - pageOffset) < 1 && Find<PasswordBox>(page, "SettingPassword").Password == password, "runtime-page-scroll-and-secret-draft-preserved-" + language);
+                Check(store.Load().Language == language && store.Load().Host == savedHost && credentials.SaveCount == credentialWrites, "runtime-language-only-persistence-without-credential-write-" + language);
+                Check(settingsEvents == 0 && transferGate.CurrentCount == gateCount && receiveSignal.CurrentCount == receiveSignalCount && viewModel.HasBusinessTransfers && ReferenceEquals(progress, viewModel.Progress), "runtime-no-service-events-or-task-state-change-" + language);
+                Check(ReferenceEquals(selected, viewModel.SelectedHistory) && viewModel.HistoryRows.Single() == selected && viewModel.SearchText == "就绪" && viewModel.KindFilter == "文本" && selected.Title == "就绪", "runtime-history-filter-selection-and-user-text-preserved-" + language);
+                Check(viewModel.Logs.Select(x => x.Message).SequenceEqual(logs), "runtime-historical-log-content-preserved-" + language);
+                Check(viewModel.StatusMessage == (english ? "Shortcuts unavailable: 就绪" : "快捷键不可用：就绪"), "runtime-current-status-localized-user-argument-opaque-" + language);
+                Check(((TextBlock)progressWindow.FindName("PhaseText")).Text == (english ? "Uploading" : "正在上传") && ((TextBlock)progressWindow.FindName("TitleText")).Text == "就绪", "runtime-existing-progress-window-" + language);
+                AssertUpdateDialog(application, window, english ? "Shanchuan update" : "闪传更新", english ? "Update and restart" : "更新并重启", english ? "Later" : "稍后");
+                Capture(window, Path.Combine(output, english ? "settings-page-english.png" : "settings-page-live-chinese.png"));
+                Capture(editor, Path.Combine(output, english ? "directory-rules-editor-english.png" : "directory-rules-editor-live-chinese.png"));
+            }
         }
         finally
         {
-            englishWindow.AllowClose = true;
-            englishWindow.Close();
-            Localization.Configure("zh-Hans");
-            LoadProductionStyles(application);
+            viewModel.SettingsApplied -= Applied;
+            captureFlag.SetValue(viewModel, 0);
+            progressWindow.CloseForShutdown();
+            port.SetCurrentValue(TextBox.TextProperty, originalPort);
+            host.SetCurrentValue(TextBox.TextProperty, savedHost);
+            Pump();
+            Click(editor, "CompleteDirectoryRules");
+            if (Localization.CurrentLanguage != "zh-Hans") viewModel.ChangeLanguage("zh-Hans");
         }
+        Check(application.Windows.Count == 1, "runtime-language-roundtrip-no-replacement-or-stray-windows");
     }
 
     private static void AssertUpdateDialog(Application application, Window owner, string title, string update, string later)
     {
         Exception? failure = null;
+        var initialLanguage = Localization.CurrentLanguage;
         owner.Dispatcher.BeginInvoke(new Action(() =>
         {
             Window? dialog = null;
@@ -262,11 +305,24 @@ internal static class Program
                 Check(Find<Button>(dialog, "ConfirmUpdateInstall").Content as string == update, "localized-update-dialog-affirmative-" + Localization.CurrentLanguage);
                 var postpone = Find<Button>(dialog, "DialogNo");
                 Check(postpone.Content as string == later && postpone.IsDefault, "localized-update-dialog-safe-default-" + Localization.CurrentLanguage);
+                var updateButton = Find<Button>(dialog, "ConfirmUpdateInstall");
+                var opposite = initialLanguage == "en" ? "zh-Hans" : "en";
+                Localization.Configure(opposite);
+                Pump();
+                Check(dialog.Title == (opposite == "en" ? "Shanchuan update" : "闪传更新") &&
+                    ReferenceEquals(updateButton, Find<Button>(dialog, "ConfirmUpdateInstall")) &&
+                    updateButton.Content as string == (opposite == "en" ? "Update and restart" : "更新并重启"), "runtime-existing-dialog-title-and-button-" + initialLanguage);
+                var message = Find<TextBlock>(dialog, "UpdateDialogMessage").Text;
+                Check(message.Contains(opposite == "en" ? "Target version" : "目标版本") && message.Contains("就绪"), "runtime-existing-dialog-message-and-opaque-notes-" + initialLanguage);
+                Localization.Configure(initialLanguage);
+                Pump();
                 postpone.RaiseEvent(new RoutedEventArgs(Button.ClickEvent, postpone));
             }
             catch (Exception error) { failure = error; dialog?.Close(); }
+            finally { Localization.Configure(initialLanguage); }
         }), DispatcherPriority.ApplicationIdle);
-        var approved = LocalizedMessageBox.ConfirmUpdate(owner, "0.1.3 → 0.1.4", title);
+        var approved = LocalizedMessageBox.ConfirmUpdate(owner,
+            Localization.MF($"当前版本：v{"0.1.4"}\n目标版本：v{"0.2.0"}\n\n{"就绪"}\n\n"), Localization.M("闪传更新"));
         if (failure is not null) throw failure;
         Check(!approved, "localized-update-dialog-later-does-not-approve-" + Localization.CurrentLanguage);
     }

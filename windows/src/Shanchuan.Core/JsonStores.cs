@@ -83,7 +83,7 @@ internal static class JsonFileStore
 
     public static void Write<T>(string path, T value)
     {
-        var directory = Path.GetDirectoryName(path) ?? throw new InvalidOperationException(L.T("数据文件路径无效。"));
+        var directory = Path.GetDirectoryName(path) ?? throw L.WithDescription(new InvalidOperationException(L.T("数据文件路径无效。")), L.M("数据文件路径无效。"));
         Directory.CreateDirectory(directory);
         var temporary = Path.Combine(directory, $".{Guid.NewGuid():N}.tmp");
         try

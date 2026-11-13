@@ -2,12 +2,15 @@ import SwiftUI
 import CopyToolCore
 
 struct DirectoryExclusionSettingsView: View {
+    @ObservedObject private var appLanguage = AppLanguageStore.shared
     @Binding var rules: String
     var saveStatus: SettingsAutosaveStore.Status = .ready
+    var saveStatusText: (() -> String)? = nil
     var onEditingFinished: () -> Void = {}
     @State private var showingEditor = false
 
     var body: some View {
+        let _ = appLanguage.language
         VStack(alignment: .leading, spacing: 8) {
             Text(L10n.text("每行一条；留空发送全部内容。适用于快捷键、拖入和重发目录，直接发送单个文件不受影响。"))
                 .font(.caption).foregroundStyle(.secondary)
@@ -31,7 +34,7 @@ struct DirectoryExclusionSettingsView: View {
             if let error = validationError { Text(error).font(.caption).foregroundStyle(.red) }
         }
         .sheet(isPresented: $showingEditor, onDismiss: onEditingFinished) {
-            DirectoryExclusionEditorView(rules: $rules, saveStatus: saveStatus,
+            DirectoryExclusionEditorView(rules: $rules, saveStatus: saveStatus, saveStatusText: saveStatusText,
                 addCommonRules: addCommonRules, finishEditing: {
                     onEditingFinished()
                     showingEditor = false

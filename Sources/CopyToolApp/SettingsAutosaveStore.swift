@@ -10,7 +10,7 @@ import CopyToolCore
             case .ready: return L10n.text("修改后自动保存")
             case .pending: return L10n.text("保存中…")
             case .saved: return L10n.text("已自动保存")
-            case .failed(let error): return L10n.text("未保存：") + error
+            case .failed(let error): return L10n.compose("未保存：%@", .localized(error))
             }
         }
     }
@@ -18,21 +18,36 @@ import CopyToolCore
     @Published var draft = AppPreferences()
     @Published var secret = ""
     @Published var portText = "21"
-    @Published private(set) var status = Status.ready
+    @Published private(set) var status = Status.ready {
+        didSet {
+            if case .failed(let text) = status { failureSource = L10n.capture(text) }
+            else { failureSource = nil }
+        }
+    }
+    private var failureSource: L10n.Snapshot?
+    var localizedStatusText: String {
+        if case .failed(let text) = status {
+            return L10n.snapshotCompose("未保存：%@", .snapshot(failureSource ?? L10n.capture(text))).rendered
+        }
+        return status.text
+    }
     private var baseline = AppPreferences()
     private var baselineSecret = ""
     private var baselinePort = "21"
     private var current: (() -> (AppPreferences, String))?
     private var save: ((AppPreferences, String) -> String?)?
+    private var saveFailureOrigin: (() -> L10n.Snapshot?)?
     private var pendingTask: Task<Void, Never>?
     private let delayNanoseconds: UInt64
 
     init(delayNanoseconds: UInt64 = 500_000_000) { self.delayNanoseconds = delayNanoseconds }
 
     func connect(current: @escaping () -> (AppPreferences, String),
-                 save: @escaping (AppPreferences, String) -> String?) {
+                 save: @escaping (AppPreferences, String) -> String?,
+                 failureOrigin: (() -> L10n.Snapshot?)? = nil) {
         self.current = current
         self.save = save
+        self.saveFailureOrigin = failureOrigin
         reload()
     }
 
@@ -75,7 +90,11 @@ import CopyToolCore
         values.shortcuts = latest.0.shortcuts
         values.syncEnabled = latest.0.syncEnabled
         if values != latest.0 || secret != latest.1 {
-            if let error = save(values, secret) { status = .failed(error); return }
+            if let error = save(values, secret) {
+                let origin = saveFailureOrigin?() ?? .verbatim(error)
+                status = .failed(origin.rendered); failureSource = origin
+                return
+            }
         }
         baseline = draft; baselineSecret = secret; baselinePort = portText
         status = .saved

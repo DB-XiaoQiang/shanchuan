@@ -12,6 +12,7 @@ public partial class DirectoryRulesWindow : Window
     private readonly AppViewModel _viewModel;
     private readonly bool _initializing;
     private bool _settingsAlreadySaved;
+    private bool _ruleErrorFromRules;
 
     public DirectoryRulesWindow(AppViewModel viewModel)
     {
@@ -22,6 +23,8 @@ public partial class DirectoryRulesWindow : Window
         _initializing = false;
         Closing += OnClosing;
         Loaded += (_, _) => RulesEditor.Focus();
+        L.LanguageChanged += OnLanguageChanged;
+        Closed += (_, _) => L.LanguageChanged -= OnLanguageChanged;
     }
 
     public event EventHandler? RulesChanged;
@@ -58,6 +61,7 @@ public partial class DirectoryRulesWindow : Window
         try { _ = DirectoryExclusions.Parse(_viewModel.Settings.DirectoryExclusionRules); }
         catch (ArgumentException error)
         {
+            _ruleErrorFromRules = true;
             RuleValidation.Text = error.Message;
             RuleValidation.Visibility = Visibility.Visible;
             RulesEditor.Focus();
@@ -77,6 +81,7 @@ public partial class DirectoryRulesWindow : Window
         }
         if (!_viewModel.SaveSettingsNow())
         {
+            _ruleErrorFromRules = false;
             RuleValidation.Text = _viewModel.SettingsStatus;
             RuleValidation.Visibility = Visibility.Visible;
             e.Cancel = true;
@@ -90,4 +95,27 @@ public partial class DirectoryRulesWindow : Window
     }
 
     private void Complete(object sender, RoutedEventArgs e) => Close();
+
+    private void OnLanguageChanged() => Dispatcher.Invoke(() =>
+    {
+        var text = RulesEditor.Text;
+        var start = RulesEditor.SelectionStart; var length = RulesEditor.SelectionLength;
+        var vertical = RulesEditor.VerticalOffset; var horizontal = RulesEditor.HorizontalOffset;
+        Dispatcher.BeginInvoke(new Action(() =>
+        {
+            if (!IsLoaded || RulesEditor.Text != text) return;
+            RulesEditor.Select(start, length);
+            RulesEditor.ScrollToVerticalOffset(vertical);
+            RulesEditor.ScrollToHorizontalOffset(horizontal);
+        }), System.Windows.Threading.DispatcherPriority.Loaded);
+        if (RuleValidation.Visibility == Visibility.Visible)
+        {
+            if (!_ruleErrorFromRules) RuleValidation.Text = _viewModel.SettingsStatus;
+            else
+            {
+                try { _ = DirectoryExclusions.Parse(_viewModel.Settings.DirectoryExclusionRules); }
+                catch (ArgumentException error) { RuleValidation.Text = error.Message; }
+            }
+        }
+    });
 }

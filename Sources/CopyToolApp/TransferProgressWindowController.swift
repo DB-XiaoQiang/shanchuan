@@ -8,6 +8,7 @@ import SwiftUI
 final class TransferProgressWindowController {
     private weak var model: AppModel?
     private var observation: AnyCancellable?
+    private var languageObservation: AnyCancellable?
     private var panel: TransferProgressPanel?
     private var hostingView: TransferProgressHostingView?
     private var observedTaskID: UUID?
@@ -21,6 +22,9 @@ final class TransferProgressWindowController {
 
     init(model: AppModel) {
         self.model = model
+        languageObservation = AppLanguageStore.shared.$language.dropFirst()
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.panel?.title = L10n.text("传输进度") }
         observation = Publishers.CombineLatest3(
             model.$transferSnapshot,
             model.$preferences.map(\.showTransferProgress).removeDuplicates(),
@@ -93,6 +97,8 @@ final class TransferProgressWindowController {
         stopped = true
         observation?.cancel()
         observation = nil
+        languageObservation?.cancel()
+        languageObservation = nil
         cancelTerminalHide()
         endPreview(hidePanel: true)
         panel?.close()
@@ -138,8 +144,15 @@ final class TransferProgressWindowController {
 
     private func present(_ snapshot: TransferProgressSnapshot, privacy: Bool,
                          preview: Bool, reposition: Bool) {
+        let detailSource = L10n.capture(snapshot.detail)
         let view = TransferProgressCardView(
             snapshot: snapshot, privacy: privacy, isPreview: preview,
+            localizedTitle: { [weak self] in
+                preview ? snapshot.title : (self?.model?.localizedTransferTitle ?? snapshot.title)
+            },
+            localizedDetail: { [weak self] in
+                preview ? detailSource.rendered : (self?.model?.localizedTransferDetail ?? detailSource.rendered)
+            },
             close: { [weak self] in self?.dismissCurrent(id: snapshot.id, preview: preview) },
             cancel: { [weak self] in self?.cancelCurrent(id: snapshot.id, preview: preview) }
         )
@@ -294,13 +307,17 @@ private final class TransferProgressHostingView: NSHostingView<TransferProgressC
 }
 
 private struct TransferProgressCardView: View {
+    @ObservedObject private var appLanguage = AppLanguageStore.shared
     let snapshot: TransferProgressSnapshot
     let privacy: Bool
     let isPreview: Bool
+    let localizedTitle: () -> String
+    let localizedDetail: () -> String
     let close: () -> Void
     let cancel: () -> Void
 
     var body: some View {
+        let _ = appLanguage.language
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 9) {
                 Image(systemName: phaseIcon)
@@ -351,7 +368,7 @@ private struct TransferProgressCardView: View {
                 Text(byteLabel)
                     .font(.system(size: 11)).monospacedDigit()
                     .foregroundStyle(.secondary)
-                Text(privacy ? L10n.text("隐私模式已隐藏文件名称和传输详情") : snapshot.detail)
+                Text(privacy ? L10n.text("隐私模式已隐藏文件名称和传输详情") : localizedDetail())
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
@@ -386,7 +403,7 @@ private struct TransferProgressCardView: View {
 
     private var itemName: String {
         guard !privacy else { return L10n.text("内容已隐藏") }
-        let name = snapshot.currentItem.isEmpty ? snapshot.title : snapshot.currentItem
+        let name = snapshot.currentItem.isEmpty ? localizedTitle() : snapshot.currentItem
         let filename = (name as NSString).lastPathComponent
         return filename.isEmpty ? L10n.text("传输内容") : filename
     }

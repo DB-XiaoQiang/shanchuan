@@ -1,3 +1,4 @@
+using Shanchuan.Core;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -13,22 +14,22 @@ namespace Shanchuan.Windows;
 /// <summary>App-owned dialogs use the selected app language, including their buttons.</summary>
 public static class LocalizedMessageBox
 {
-    public static MessageBoxResult Show(string message, string title,
+    public static MessageBoxResult Show(LocalizedText message, LocalizedText title,
         MessageBoxButton buttons = MessageBoxButton.OK, MessageBoxImage image = MessageBoxImage.None,
         MessageBoxResult defaultResult = MessageBoxResult.None) =>
         Show(System.Windows.Application.Current?.MainWindow, message, title, buttons, image, defaultResult);
 
-    public static MessageBoxResult Show(Window? owner, string message, string title,
+    public static MessageBoxResult Show(Window? owner, LocalizedText message, LocalizedText title,
         MessageBoxButton buttons = MessageBoxButton.OK, MessageBoxImage image = MessageBoxImage.None,
         MessageBoxResult defaultResult = MessageBoxResult.None) =>
         ShowDialog(owner, message, title, buttons, defaultResult, null, null);
 
-    public static bool ConfirmUpdate(Window owner, string message, string title) =>
+    public static bool ConfirmUpdate(Window owner, LocalizedText message, LocalizedText title) =>
         ShowDialog(owner, message, title, MessageBoxButton.YesNo, MessageBoxResult.No,
-            L.T("更新并重启"), L.T("稍后")) == MessageBoxResult.Yes;
+            L.M("更新并重启"), L.M("稍后")) == MessageBoxResult.Yes;
 
-    private static MessageBoxResult ShowDialog(Window? owner, string message, string title,
-        MessageBoxButton buttons, MessageBoxResult defaultResult, string? yesTitle, string? noTitle)
+    private static MessageBoxResult ShowDialog(Window? owner, LocalizedText message, LocalizedText title,
+        MessageBoxButton buttons, MessageBoxResult defaultResult, LocalizedText? yesTitle, LocalizedText? noTitle)
     {
         var result = buttons == MessageBoxButton.OK ? MessageBoxResult.OK :
             buttons == MessageBoxButton.YesNo ? MessageBoxResult.No : MessageBoxResult.Cancel;
@@ -41,17 +42,20 @@ public static class LocalizedMessageBox
         };
         if (owner?.IsVisible == true) window.Owner = owner;
         var content = new StackPanel { Margin = new Thickness(24) };
+        var messageText = new TextBlock { Text = message, TextWrapping = TextWrapping.Wrap, FontSize = 14 };
+        System.Windows.Automation.AutomationProperties.SetAutomationId(messageText, "UpdateDialogMessage");
         content.Children.Add(new ScrollViewer
         {
             MaxHeight = 440, VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
-            Content = new TextBlock { Text = message, TextWrapping = TextWrapping.Wrap, FontSize = 14 }
+            Content = messageText
         });
         var choices = new StackPanel
         {
             Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right,
             Margin = new Thickness(0, 20, 0, 0)
         };
-        void Add(string label, MessageBoxResult value)
+        var labels = new List<(Button Button, LocalizedText Label)>();
+        void Add(LocalizedText label, MessageBoxResult value)
         {
             var button = new Button
             {
@@ -64,21 +68,31 @@ public static class LocalizedMessageBox
                 yesTitle is not null && value == MessageBoxResult.Yes ? "ConfirmUpdateInstall" : "Dialog" + value);
             button.Click += (_, _) => { result = value; window.Close(); };
             choices.Children.Add(button);
+            labels.Add((button, label));
         }
         if (buttons is MessageBoxButton.YesNo or MessageBoxButton.YesNoCancel)
         {
-            Add(yesTitle ?? L.T("是"), MessageBoxResult.Yes);
-            Add(noTitle ?? L.T("否"), MessageBoxResult.No);
+            Add(yesTitle ?? L.M("是"), MessageBoxResult.Yes);
+            Add(noTitle ?? L.M("否"), MessageBoxResult.No);
         }
-        else Add(L.T("确定"), MessageBoxResult.OK);
-        if (buttons is MessageBoxButton.OKCancel or MessageBoxButton.YesNoCancel) Add(L.T("取消"), MessageBoxResult.Cancel);
+        else Add(L.M("确定"), MessageBoxResult.OK);
+        if (buttons is MessageBoxButton.OKCancel or MessageBoxButton.YesNoCancel) Add(L.M("取消"), MessageBoxResult.Cancel);
         content.Children.Add(choices);
         window.Content = content;
         window.PreviewKeyDown += (_, e) =>
         {
             if (e.Key == Key.Escape) { e.Handled = true; window.Close(); }
         };
-        window.ShowDialog();
+        void RefreshLanguage() => window.Dispatcher.Invoke(() =>
+        {
+            window.Title = title;
+            messageText.Text = message;
+            foreach (var pair in labels) pair.Button.Content = pair.Label.ToString();
+        });
+        RefreshLanguage();
+        L.LanguageChanged += RefreshLanguage;
+        try { window.ShowDialog(); }
+        finally { L.LanguageChanged -= RefreshLanguage; }
         return result;
     }
 }

@@ -36,7 +36,7 @@ public sealed class GitHubUpdateSource : IUpdateSource
         RequireTag(tag);
         var names = release.GetProperty("assets").EnumerateArray().Select(x => x.GetProperty("name").GetString()).ToHashSet();
         if (!names.Contains(UpdateManifestVerifier.ManifestName) || !names.Contains(UpdateManifestVerifier.SignatureName))
-            throw new InvalidDataException(L.T("正式版本缺少已签名更新清单。"));
+            throw L.WithDescription(new InvalidDataException(L.T("正式版本缺少已签名更新清单。")), L.M("正式版本缺少已签名更新清单。"));
         var manifest = await DownloadBytesAsync(AssetUrl(tag, UpdateManifestVerifier.ManifestName), UpdateManifestVerifier.MaxManifestBytes, token);
         var signature = await DownloadBytesAsync(AssetUrl(tag, UpdateManifestVerifier.SignatureName), 256, token);
         return new RemoteUpdateRelease(tag, manifest, signature);
@@ -48,24 +48,24 @@ public sealed class GitHubUpdateSource : IUpdateSource
         using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token);
         response.EnsureSuccessStatusCode();
         if (response.Content.Headers.ContentLength is { } length && length != asset.Size)
-            throw new InvalidDataException(L.T("GitHub 更新附件大小与清单不一致。"));
+            throw L.WithDescription(new InvalidDataException(L.T("GitHub 更新附件大小与清单不一致。")), L.M("GitHub 更新附件大小与清单不一致。"));
         await using var input = await response.Content.ReadAsStreamAsync(token);
         await using var output = new FileStream(destination, FileMode.CreateNew, FileAccess.Write, FileShare.None, 128 * 1024, true);
         await CopyBoundedAsync(input, output, asset.Size, token);
-        if (output.Length != asset.Size) throw new InvalidDataException(L.T("GitHub 更新附件未完整下载。"));
+        if (output.Length != asset.Size) throw L.WithDescription(new InvalidDataException(L.T("GitHub 更新附件未完整下载。")), L.M("GitHub 更新附件未完整下载。"));
     }
 
     public static string AssetUrl(string tag, string name)
     {
         RequireTag(tag);
-        if (!UpdateManifestVerifier.IsSafeName(name)) throw new InvalidDataException(L.T("更新附件名无效。"));
+        if (!UpdateManifestVerifier.IsSafeName(name)) throw L.WithDescription(new InvalidDataException(L.T("更新附件名无效。")), L.M("更新附件名无效。"));
         return "https://github.com/" + Repository + "/releases/download/" + tag + "/" + name;
     }
 
     public static void RequireTag(string tag)
     {
         if (!tag.StartsWith('v') || !UpdateManifestVerifier.IsVersion(tag[1..]))
-            throw new InvalidDataException(L.T("GitHub 正式版本标签无效。"));
+            throw L.WithDescription(new InvalidDataException(L.T("GitHub 正式版本标签无效。")), L.M("GitHub 正式版本标签无效。"));
     }
 
     private static HttpRequestMessage Request(string url, bool api = false)
@@ -81,7 +81,7 @@ public sealed class GitHubUpdateSource : IUpdateSource
         using var request = Request(url);
         using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token);
         response.EnsureSuccessStatusCode();
-        if (response.Content.Headers.ContentLength > maximum) throw new InvalidDataException(L.T("更新元数据过大。"));
+        if (response.Content.Headers.ContentLength > maximum) throw L.WithDescription(new InvalidDataException(L.T("更新元数据过大。")), L.M("更新元数据过大。"));
         await using var input = await response.Content.ReadAsStreamAsync(token);
         using var output = new MemoryStream();
         await CopyBoundedAsync(input, output, maximum, token);
@@ -96,7 +96,7 @@ public sealed class GitHubUpdateSource : IUpdateSource
         while ((count = await input.ReadAsync(buffer, token)) > 0)
         {
             total += count;
-            if (total > maximum) throw new InvalidDataException(L.T("更新下载超过清单允许的大小。"));
+            if (total > maximum) throw L.WithDescription(new InvalidDataException(L.T("更新下载超过清单允许的大小。")), L.M("更新下载超过清单允许的大小。"));
             await output.WriteAsync(buffer.AsMemory(0, count), token);
         }
     }

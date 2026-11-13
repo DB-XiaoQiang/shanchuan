@@ -140,7 +140,14 @@
                               CanUserAddRows="False" Background="#FFFFFF" BorderBrush="#E5EAF1" RowHeight="44">
                         <DataGrid.Columns>
                             <DataGridTextColumn Header="{loc:Tr Key='时间'}" Binding="{Binding Date, StringFormat=yyyy-MM-dd HH:mm:ss}" Width="170" />
-                            <DataGridTextColumn Header="{loc:Tr Key='级别'}" Binding="{Binding Level, Converter={StaticResource LocalizedValue}}" Width="90" />
+                            <DataGridTextColumn Header="{loc:Tr Key='级别'}" Width="90">
+                                <DataGridTextColumn.Binding>
+                                    <MultiBinding Converter="{StaticResource LocalizedValue}">
+                                        <Binding Path="Level" />
+                                        <Binding Source="{x:Static loc:LocalizationSource.Instance}" Path="Revision" />
+                                    </MultiBinding>
+                                </DataGridTextColumn.Binding>
+                            </DataGridTextColumn>
                             <DataGridTextColumn Header="{loc:Tr Key='事件'}" Binding="{Binding Message}" Width="*" />
                         </DataGrid.Columns>
                     </DataGrid>

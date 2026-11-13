@@ -1,0 +1,68 @@
+name: 补齐预发布草稿的 Windows 附件
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 已存在的预发布草稿标签（vX.Y.Z）
+        required: true
+        type: string
+      ci_run_id:
+        description: 同一提交、已经全部成功的 main 主 CI run id
+        required: true
+        type: string
+      mac_zip_sha256:
+        description: 本机已上传到草稿的 Mac ZIP SHA-256
+        required: true
+        type: string
+      mac_dmg_sha256:
+        description: 本机已上传到草稿的 Mac DMG SHA-256
+        required: true
+        type: string
+permissions:
+  contents: write
+  actions: read
+concurrency:
+  group: attach-prerelease-windows-${{ inputs.tag }}
+  cancel-in-progress: false
+jobs:
+  attach:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ inputs.tag }}
+      CI_RUN_ID: ${{ inputs.ci_run_id }}
+      MAC_ZIP_SHA256: ${{ inputs.mac_zip_sha256 }}
+      MAC_DMG_SHA256: ${{ inputs.mac_dmg_sha256 }}
+    steps:
+      - name: 解析可信主 CI 提交
+        id: source
+        run: |
+          python3 - <<'PY'
+          import json, os, re, subprocess
+          repo = os.environ['GITHUB_REPOSITORY']
+          run_id = os.environ['CI_RUN_ID']
+          if repo != 'DB-XiaoQiang/shanchuan' or not re.fullmatch(r'[1-9][0-9]{0,18}', run_id):
+              raise SystemExit('仓库或 CI run id 无效。')
+          run = json.loads(subprocess.run(['gh', 'api', '--method', 'GET', f'repos/{repo}/actions/runs/{run_id}'],
+                                         capture_output=True, check=True).stdout)
+          sha = run.get('head_sha', '')
+          if not (re.fullmatch(r'[0-9a-f]{40}', sha) and run.get('status') == 'completed'
+                  and run.get('conclusion') == 'success' and run.get('head_branch') == 'main'
+                  and run.get('path') == '.github/workflows/ci.yml'
+                  and run.get('event') in {'push', 'workflow_dispatch'}
+                  and run.get('repository', {}).get('full_name') == repo
+                  and run.get('head_repository', {}).get('full_name') == repo):
+              raise SystemExit('只能检出同仓库成功 main 主 CI 的提交。')
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write('sha=' + sha + '\n')
+          PY
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.source.outputs.sha }}
+          persist-credentials: false
+      - name: 校验并补齐草稿附件（不发布）
+        run: |
+          python3 scripts/attach-prerelease-windows.py \
+            --tag "$RELEASE_TAG" --ci-run-id "$CI_RUN_ID" \
+            --mac-zip-sha256 "$MAC_ZIP_SHA256" --mac-dmg-sha256 "$MAC_DMG_SHA256"

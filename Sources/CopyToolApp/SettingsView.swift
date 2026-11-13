@@ -3,12 +3,12 @@ import ServiceManagement
 import CopyToolCore
 
 struct SettingsView: View {
-    @AppStorage(AppLanguage.preferenceKey) private var selectedLanguage = AppLanguage.simplifiedChinese.rawValue
+    @ObservedObject private var appLanguage = AppLanguageStore.shared
     @ObservedObject var model: AppModel
     @ObservedObject private var autosave: SettingsAutosaveStore
     @ObservedObject private var connectionTest: FTPConnectionTestStore
     @ObservedObject private var failureNotifications = FailureNotifications.shared
-    @State private var migrationError = ""
+    @State private var migrationError = L10n.Snapshot.verbatim("")
     @State private var autostart = SMAppService.mainApp.status == .enabled
     @State private var autostartError = ""
     @ObservedObject private var windowAccess: SettingsWindowAccess
@@ -28,13 +28,13 @@ struct SettingsView: View {
             Form {
                 Section(L10n.text("语言")) {
                     Picker(L10n.text("界面语言"), selection: Binding(
-                        get: { AppLanguage.resolve(selectedLanguage) },
-                        set: { selectedLanguage = $0.rawValue })) {
+                        get: { appLanguage.language },
+                        set: { appLanguage.select($0) })) {
                         ForEach(AppLanguage.allCases, id: \.self) { language in
                             Text(language.displayName).tag(language)
                         }
                     }.accessibilityIdentifier("app-language-picker")
-                    Text(L10n.text("默认简体中文。更改语言后，请退出并重新打开应用生效。"))
+                    Text(L10n.text("默认简体中文。选择后立即生效，并自动保存。"))
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 Section(L10n.text("FTP 投递")) {
@@ -58,7 +58,7 @@ struct SettingsView: View {
                         if connectionTest.state != .idle {
                             HStack(alignment: .top, spacing: 6) {
                                 Image(systemName: connectionResultIcon)
-                                Text(connectionTest.state.text).fixedSize(horizontal: false, vertical: true)
+                                Text(connectionTest.localizedText).fixedSize(horizontal: false, vertical: true)
                                 if connectionTest.isTesting {
                                     Spacer()
                                     Button(L10n.text("取消")) { connectionTest.cancel() }
@@ -76,7 +76,8 @@ struct SettingsView: View {
                 }.disabled(!model.allowsBusinessTransfers)
                 Section(L10n.text("目录排除规则")) {
                     DirectoryExclusionSettingsView(rules: $autosave.draft.directoryExclusionRules,
-                        saveStatus: autosave.status, onEditingFinished: { autosave.flush() })
+                        saveStatus: autosave.status, saveStatusText: { autosave.localizedStatusText },
+                        onEditingFinished: { autosave.flush() })
                 }
                 Section(L10n.text("本地行为")) {
                     Stepper(L10n.format("历史保留：%@ 天", String(describing: autosave.draft.ttlDays)), value: $autosave.draft.ttlDays, in: 1...3650)
@@ -105,28 +106,28 @@ struct SettingsView: View {
                 }.disabled(!model.allowsBusinessTransfers)
                 Section(L10n.text("复制发送 / 粘贴快捷键")) { ShortcutSettingsView(model: model) }.disabled(!model.allowsBusinessTransfers)
             }.formStyle(.grouped)
-            if !migrationError.isEmpty { Text(migrationError).foregroundStyle(.red) }
+            if !migrationError.rendered.isEmpty { Text(migrationError.rendered).foregroundStyle(.red) }
             if !autostartError.isEmpty { Text(L10n.format("开机启动：%@", String(describing: autostartError))).foregroundStyle(.red) }
             VStack(alignment: .leading, spacing: 6) {
                 HStack {
                     Button(L10n.text("从原应用迁移 FTP")) {
                         autosave.flush()
                         model.migrateOriginalFTP()
-                        migrationError = model.settingsError
-                        if migrationError.isEmpty { autosave.reload() }
+                        migrationError = model.settingsErrorSnapshot
+                        if migrationError.rendered.isEmpty { autosave.reload() }
                     }.disabled(!model.allowsBusinessTransfers)
-                    Button(L10n.text("撤销未保存修改")) { autosave.reload(); migrationError = "" }
+                    Button(L10n.text("撤销未保存修改")) { autosave.reload(); migrationError = .verbatim("") }
                         .disabled(!canDiscardChanges)
                 }
                 Text(L10n.text("测试连接不上传文件")).font(.caption).foregroundStyle(.secondary)
-                Text(autosave.status.text).font(.caption)
+                Text(autosave.localizedStatusText).font(.caption)
                     .foregroundStyle(statusColor)
             }
         }
         .onAppear { session.connect(model: model) }
-        .onChange(of: autosave.draft) { _ in migrationError = ""; autosave.schedule() }
-        .onChange(of: autosave.secret) { _ in migrationError = ""; autosave.schedule() }
-        .onChange(of: autosave.portText) { _ in migrationError = ""; autosave.schedule() }
+        .onChange(of: autosave.draft) { _ in migrationError = .verbatim(""); autosave.schedule() }
+        .onChange(of: autosave.secret) { _ in migrationError = .verbatim(""); autosave.schedule() }
+        .onChange(of: autosave.portText) { _ in migrationError = .verbatim(""); autosave.schedule() }
         .onChange(of: connectionInput) { input in connectionTest.inputChanged(input) }
         .onDisappear { windowAccess.flushBeforeClose() }
         .background(SettingsWindowReader(access: windowAccess).frame(width: 0, height: 0))

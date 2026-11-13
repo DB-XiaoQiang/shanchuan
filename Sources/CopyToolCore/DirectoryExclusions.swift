@@ -25,7 +25,7 @@ public struct DirectoryExclusions: Sendable {
             else if line.contains("\\") || line.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) {
                 reason = L10n.text("路径请使用 /，规则不能含控制字符或反斜杠")
             } else { reason = nil }
-            if let reason { throw FTPTransferError.invalidSettings(L10n.format("目录排除规则第 %@ 行：%@。", String(describing: index + 1), String(describing: reason))) }
+            if let reason { throw FTPTransferError.invalidSettings(L10n.compose("目录排除规则第 %@ 行：%@。", .literal(String(index + 1)), .localized(reason))) }
             let directoriesOnly = line.hasSuffix("/")
             let anchored = line.hasPrefix("/")
             var pattern = line

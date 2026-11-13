@@ -2,6 +2,7 @@ import SwiftUI
 import CopyToolCore
 
 struct TransferLogsView: View {
+    @ObservedObject private var appLanguage = AppLanguageStore.shared
     @ObservedObject var model: AppModel
     @State private var search = ""
 
@@ -16,6 +17,7 @@ struct TransferLogsView: View {
     }
 
     var body: some View {
+        let _ = appLanguage.language
         VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .firstTextBaseline) {
                 Text(L10n.text("传输日志")).font(.title2)
@@ -101,10 +103,12 @@ struct TransferLogsView: View {
 }
 
 private struct TransferLogRow: View {
+    @ObservedObject private var appLanguage = AppLanguageStore.shared
     let entry: TransferLogEntry
     let privacy: Bool
 
     var body: some View {
+        let _ = appLanguage.language
         VStack(alignment: .leading, spacing: 7) {
             HStack(spacing: 10) {
                 Text(Self.dateText(entry.date))

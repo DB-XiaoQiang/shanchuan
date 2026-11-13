@@ -97,7 +97,7 @@ public sealed class FtpReceiveService(ReceiveStateStore stateStore)
             var controlFile = Path.Combine(staging, "control");
             await Download(client, controlFile, controlPath, cancellationToken).ConfigureAwait(false);
             if (new FileInfo(controlFile).Length > MaxControlBytes)
-                throw new InvalidDataException(L.T("控制文件超过 16 MiB，已停止处理。"));
+                throw L.WithDescription(new InvalidDataException(L.T("控制文件超过 16 MiB，已停止处理。")), L.M("控制文件超过 16 MiB，已停止处理。"));
             var content = await File.ReadAllTextAsync(controlFile, StrictUtf8, cancellationToken).ConfigureAwait(false);
             if (!content.StartsWith("file=", StringComparison.Ordinal))
                 return new ReceivedItem(new HistoryEntry
@@ -146,12 +146,12 @@ public sealed class FtpReceiveService(ReceiveStateStore stateStore)
     private static List<RemoteEntity> ParseManifest(string content, AppSettings settings)
     {
         var firstBreak = content.IndexOfAny(['\r', '\n']);
-        if (firstBreak < 0) throw new InvalidDataException(L.T("文件控制清单缺少时间戳，远端数据已保留。"));
+        if (firstBreak < 0) throw L.WithDescription(new InvalidDataException(L.T("文件控制清单缺少时间戳，远端数据已保留。")), L.M("文件控制清单缺少时间戳，远端数据已保留。"));
         var manifest = content[5..firstBreak];
         var timestamp = content[(firstBreak + 1)..].Trim();
         if (!long.TryParse(timestamp, NumberStyles.None, CultureInfo.InvariantCulture, out _))
-            throw new InvalidDataException(L.T("文件控制清单的时间戳无效，远端数据已保留。"));
-        if (manifest.Length == 0) throw new InvalidDataException(L.T("文件控制清单为空，远端数据已保留。"));
+            throw L.WithDescription(new InvalidDataException(L.T("文件控制清单的时间戳无效，远端数据已保留。")), L.M("文件控制清单的时间戳无效，远端数据已保留。"));
+        if (manifest.Length == 0) throw L.WithDescription(new InvalidDataException(L.T("文件控制清单为空，远端数据已保留。")), L.M("文件控制清单为空，远端数据已保留。"));
 
         var entities = new List<RemoteEntity>();
         var remotePaths = new HashSet<string>(StringComparer.Ordinal);
@@ -159,10 +159,10 @@ public sealed class FtpReceiveService(ReceiveStateStore stateStore)
         {
             var parts = item.Split('|');
             if (parts.Length != 2 || parts[1].Length != 32 || !parts[1].All(Uri.IsHexDigit))
-                throw new InvalidDataException(L.T("文件控制清单包含无效的名称或 MD5，远端数据已保留。"));
+                throw L.WithDescription(new InvalidDataException(L.T("文件控制清单包含无效的名称或 MD5，远端数据已保留。")), L.M("文件控制清单包含无效的名称或 MD5，远端数据已保留。"));
             var isFolder = parts[0].StartsWith("folder:", StringComparison.Ordinal);
             var isMarked = parts[0].StartsWith("877D1C:", StringComparison.Ordinal);
-            if (isFolder && isMarked) throw new InvalidDataException(L.T("文件控制清单包含冲突的类型标记。"));
+            if (isFolder && isMarked) throw L.WithDescription(new InvalidDataException(L.T("文件控制清单包含冲突的类型标记。")), L.M("文件控制清单包含冲突的类型标记。"));
             var prefixLength = isFolder ? 7 : isMarked ? 7 : 0;
             var localName = parts[0][prefixLength..];
             Require(ProtocolValidation.ValidateName(localName));
@@ -179,7 +179,7 @@ public sealed class FtpReceiveService(ReceiveStateStore stateStore)
             }
             else remoteDirectory = settings.Directory.TrimEnd('/') + "/system_temp";
             var remotePath = remoteDirectory + "/" + remoteName;
-            if (!remotePaths.Add(remotePath)) throw new InvalidDataException(L.T("文件控制清单包含重复的远端实体。"));
+            if (!remotePaths.Add(remotePath)) throw L.WithDescription(new InvalidDataException(L.T("文件控制清单包含重复的远端实体。")), L.M("文件控制清单包含重复的远端实体。"));
             entities.Add(new RemoteEntity(localName, remotePath, parts[1], isFolder));
         }
         return entities;
@@ -341,7 +341,7 @@ public sealed class FtpReceiveService(ReceiveStateStore stateStore)
     private static void Validate(AppSettings settings, string password)
     {
         if (settings.ValidateForTransfer() is { } error) throw new InvalidDataException(error);
-        if (password.Any(char.IsControl)) throw new InvalidDataException(L.T("FTP 密码不能包含控制字符。"));
+        if (password.Any(char.IsControl)) throw L.WithDescription(new InvalidDataException(L.T("FTP 密码不能包含控制字符。")), L.M("FTP 密码不能包含控制字符。"));
     }
 
     private static void Require(string? error)
@@ -400,8 +400,8 @@ internal static class SafeZipExtractor
             var isDirectory = entry.FullName.EndsWith('/') || entry.FullName.EndsWith('\\');
             var relative = ValidateEntry(entry.FullName, isDirectory);
             var unixType = (entry.ExternalAttributes >> 16) & 0xF000;
-            if (unixType == 0xA000) throw new InvalidDataException(L.T("ZIP 包含符号链接，已拒绝解压。"));
-            if (!paths.Add(relative)) throw new InvalidDataException(L.T("ZIP 包含重复路径，已拒绝解压。"));
+            if (unixType == 0xA000) throw L.WithDescription(new InvalidDataException(L.T("ZIP 包含符号链接，已拒绝解压。")), L.M("ZIP 包含符号链接，已拒绝解压。"));
+            if (!paths.Add(relative)) throw L.WithDescription(new InvalidDataException(L.T("ZIP 包含重复路径，已拒绝解压。")), L.M("ZIP 包含重复路径，已拒绝解压。"));
             entries.Add((entry, relative, isDirectory));
         }
 
@@ -428,11 +428,11 @@ internal static class SafeZipExtractor
 
     private static string ValidateEntry(string name, bool isDirectory)
     {
-        if (string.IsNullOrWhiteSpace(name) || name.Contains('\0')) throw new InvalidDataException(L.T("ZIP 包含空路径。"));
+        if (string.IsNullOrWhiteSpace(name) || name.Contains('\0')) throw L.WithDescription(new InvalidDataException(L.T("ZIP 包含空路径。")), L.M("ZIP 包含空路径。"));
         var normalized = name.Replace('\\', '/');
-        if (normalized.StartsWith('/')) throw new InvalidDataException(L.T("ZIP 包含绝对路径，已拒绝解压。"));
+        if (normalized.StartsWith('/')) throw L.WithDescription(new InvalidDataException(L.T("ZIP 包含绝对路径，已拒绝解压。")), L.M("ZIP 包含绝对路径，已拒绝解压。"));
         var components = normalized.Split('/', StringSplitOptions.RemoveEmptyEntries);
-        if (components.Length == 0 && !isDirectory) throw new InvalidDataException(L.T("ZIP 包含无效文件路径。"));
+        if (components.Length == 0 && !isDirectory) throw L.WithDescription(new InvalidDataException(L.T("ZIP 包含无效文件路径。")), L.M("ZIP 包含无效文件路径。"));
         foreach (var component in components)
         {
             if (component is "." or ".." || component.EndsWith(' ') || component.EndsWith('.') ||

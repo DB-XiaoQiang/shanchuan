@@ -42,7 +42,7 @@ public partial class App : System.Windows.Application
         _mutex = new Mutex(true, MutexName, out _ownsMutex);
         if (!_ownsMutex)
         {
-            MessageBox.Show(L.T("闪传已经在运行，请通过任务栏托盘打开。"), L.T("闪传"),
+            MessageBox.Show(L.M("闪传已经在运行，请通过任务栏托盘打开。"), L.M("闪传"),
                 MessageBoxButton.OK, MessageBoxImage.Information);
             Shutdown();
             return;
@@ -81,7 +81,7 @@ public partial class App : System.Windows.Application
         _viewModel.Updates.Start();
 
         if (startupErrors.Count > 0)
-            MessageBox.Show(string.Join("\n", startupErrors), L.T("部分本机数据未能读取"),
+            MessageBox.Show(string.Join("\n", startupErrors), L.M("部分本机数据未能读取"),
                 MessageBoxButton.OK, MessageBoxImage.Warning);
     }
 
@@ -105,7 +105,7 @@ public partial class App : System.Windows.Application
             _hotkeys.Update(_viewModel.Settings.Shortcuts);
             _viewModel.ReportHotkeysReady();
         }
-        catch (Exception error) { _viewModel.ReportHotkeyError(error.Message); }
+        catch (Exception error) { _viewModel.ReportHotkeyError(L.Describe(error)); }
     }
 
     private void OnSettingsApplied(object? sender, EventArgs e)
@@ -116,9 +116,9 @@ public partial class App : System.Windows.Application
             _hotkeys?.Update(_viewModel.Settings.Shortcuts);
             _viewModel.ReportHotkeysReady();
         }
-        catch (Exception error) { _viewModel.ReportHotkeyError(error.Message); }
+        catch (Exception error) { _viewModel.ReportHotkeyError(L.Describe(error)); }
         try { WindowsStartupService.Apply(_viewModel.Settings.StartWithWindows); }
-        catch (Exception error) { _viewModel.ReportActionError(L.T("登录启动设置失败：") + error.Message); }
+        catch (Exception error) { _viewModel.ReportActionError(L.M("登录启动设置失败：") + L.Describe(error)); }
         _progressWindow?.ApplyPreferences();
     }
 
@@ -127,12 +127,12 @@ public partial class App : System.Windows.Application
         if (_viewModel is null || _historyStore is null) return;
         if (!_viewModel.CanSend)
         {
-            _viewModel.ReportActionError(L.T("当前不是外网（只发送）模式，已阻止复制上传。请检查配置中心的网络位置。"));
+            _viewModel.ReportActionError(L.M("当前不是外网（只发送）模式，已阻止复制上传。请检查配置中心的网络位置。"));
             return;
         }
         if (Interlocked.CompareExchange(ref _copyInProgress, 1, 0) != 0)
         {
-            _viewModel.ReportActionError(L.T("上一次复制内容仍在捕获中，请稍候再按快捷键。"));
+            _viewModel.ReportActionError(L.M("上一次复制内容仍在捕获中，请稍候再按快捷键。"));
             return;
         }
         _viewModel.SetCopyCaptureInProgress(true);
@@ -148,7 +148,7 @@ public partial class App : System.Windows.Application
                 case HistoryKind.File: _viewModel.EnqueuePaths(captured.Paths); break;
             }
         }
-        catch (Exception error) { _viewModel.ReportActionError(L.T("复制捕获失败：") + error.Message); }
+        catch (Exception error) { _viewModel.ReportActionError(L.M("复制捕获失败：") + L.Describe(error)); }
         finally
         {
             _viewModel.SetCopyCaptureInProgress(false);
@@ -164,7 +164,7 @@ public partial class App : System.Windows.Application
             await SendInputService.WaitForModifiersReleasedAsync();
             await SendInputService.SendPasteAsync();
         }
-        catch (Exception error) { _viewModel.ReportActionError(L.T("粘贴失败：") + error.Message); }
+        catch (Exception error) { _viewModel.ReportActionError(L.M("粘贴失败：") + L.Describe(error)); }
     }
 
     private void ShowMainWindow()

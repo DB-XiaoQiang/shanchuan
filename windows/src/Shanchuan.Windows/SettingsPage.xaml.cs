@@ -16,6 +16,8 @@ public partial class SettingsPage : System.Windows.Controls.UserControl
     private readonly AppViewModel _viewModel;
     private readonly bool _initializing;
     private DirectoryRulesWindow? _rulesEditor;
+    private LocalizedText _hotkeyError = "";
+    private bool _numericValidationShown;
 
     public SettingsPage(AppViewModel viewModel)
     {
@@ -30,12 +32,16 @@ public partial class SettingsPage : System.Windows.Controls.UserControl
         CopyHotkey.Text = viewModel.Settings.Shortcuts.Copy.DisplayName;
         PasteHotkey.Text = viewModel.Settings.Shortcuts.Paste.DisplayName;
         _initializing = false;
+        _viewModel.CanAutosaveDraft = () => !Descendants(this).OfType<System.Windows.Controls.Control>().Any(Validation.GetHasError);
+        Loaded += (_, _) => { L.LanguageChanged -= OnLanguageChanged; L.LanguageChanged += OnLanguageChanged; OnLanguageChanged(); };
+        Unloaded += (_, _) => L.LanguageChanged -= OnLanguageChanged;
     }
 
     private void SettingChanged(object sender, RoutedEventArgs e)
     {
         if (!_initializing)
         {
+            _numericValidationShown = false;
             PageValidation.Visibility = Visibility.Collapsed;
             _viewModel.SettingsEdited();
         }
@@ -51,8 +57,7 @@ public partial class SettingsPage : System.Windows.Controls.UserControl
     private void LanguageChanged(object sender, SelectionChangedEventArgs e)
     {
         if (_initializing || LanguageSelector.SelectedValue is not string language) return;
-        _viewModel.Settings.Language = language;
-        _viewModel.SettingsEdited();
+        _viewModel.ChangeLanguage(language);
     }
 
     private void BrowseReceiveDirectory(object sender, RoutedEventArgs e)
@@ -106,7 +111,8 @@ public partial class SettingsPage : System.Windows.Controls.UserControl
         else options.Paste = binding;
         if (options.Validate() is { } error)
         {
-            HotkeyError.Text = error;
+            _hotkeyError = LocalizedText.Live(() => options.Validate() ?? "");
+            HotkeyError.Text = _hotkeyError;
             return;
         }
 
@@ -115,6 +121,7 @@ public partial class SettingsPage : System.Windows.Controls.UserControl
         CopyHotkey.Text = options.Copy.DisplayName;
         PasteHotkey.Text = options.Paste.DisplayName;
         HotkeyError.Text = "";
+        _hotkeyError = "";
         _viewModel.SettingsEdited();
     }
 
@@ -125,6 +132,7 @@ public partial class SettingsPage : System.Windows.Controls.UserControl
         CopyHotkey.Text = _viewModel.Settings.Shortcuts.Copy.DisplayName;
         PasteHotkey.Text = _viewModel.Settings.Shortcuts.Paste.DisplayName;
         HotkeyError.Text = "";
+        _hotkeyError = "";
         _viewModel.SettingsEdited();
     }
 
@@ -177,6 +185,7 @@ public partial class SettingsPage : System.Windows.Controls.UserControl
             .FirstOrDefault(Validation.GetHasError);
         if (invalid is not null)
         {
+            _numericValidationShown = true;
             PageValidation.Text = L.T("配置尚未保存：请修正标红的输入值后再离开此页面。");
             PageValidation.Visibility = Visibility.Visible;
             invalid.BringIntoView();
@@ -185,6 +194,7 @@ public partial class SettingsPage : System.Windows.Controls.UserControl
         }
         if (!_viewModel.SaveSettingsNow())
         {
+            _numericValidationShown = false;
             PageValidation.Text = _viewModel.SettingsStatus;
             PageValidation.Visibility = Visibility.Visible;
             return false;
@@ -193,6 +203,29 @@ public partial class SettingsPage : System.Windows.Controls.UserControl
         _rulesEditor?.CloseAfterSaved();
         return true;
     }
+
+    private void OnLanguageChanged() => Dispatcher.Invoke(() =>
+    {
+        var vertical = SettingsScroll.VerticalOffset;
+        Dispatcher.BeginInvoke(new Action(() =>
+        {
+            if (IsLoaded) SettingsScroll.ScrollToVerticalOffset(vertical);
+        }), System.Windows.Threading.DispatcherPriority.Loaded);
+        DefaultReceivePath.Text = L.T("留空使用：") + NetworkPolicy.ResolveReceiveDirectory("");
+        static void SetPreservingSelection(TextBox box, string text)
+        {
+            if (box.Text == text) return;
+            var start = box.SelectionStart; var length = box.SelectionLength;
+            box.Text = text;
+            box.Select(Math.Min(start, text.Length), Math.Min(length, Math.Max(0, text.Length - start)));
+        }
+        SetPreservingSelection(CopyHotkey, _viewModel.Settings.Shortcuts.Copy.DisplayName);
+        SetPreservingSelection(PasteHotkey, _viewModel.Settings.Shortcuts.Paste.DisplayName);
+        HotkeyError.Text = _hotkeyError;
+        if (PageValidation.Visibility == Visibility.Visible)
+            PageValidation.Text = _numericValidationShown
+                ? L.T("配置尚未保存：请修正标红的输入值后再离开此页面。") : _viewModel.SettingsStatus;
+    });
 
     private static IEnumerable<DependencyObject> Descendants(DependencyObject root)
     {

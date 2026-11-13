@@ -39,7 +39,11 @@ struct SendFailureNoticePolicy {
 @MainActor final class FailureNotifications: NSObject, ObservableObject, UNUserNotificationCenterDelegate {
     static let shared = FailureNotifications()
     static let openLogs = Notification.Name("CopyToolOpenFailureLogs")
-    @Published private(set) var status = L10n.text("发送失败时提醒；成功发送不通知。")
+    @Published private var statusSource = L10n.snapshot("发送失败时提醒；成功发送不通知。")
+    private(set) var status: String {
+        get { statusSource.rendered }
+        set { statusSource = L10n.capture(newValue) }
+    }
     private let logger = Logger(subsystem: "local.copytool.independent", category: "FailureNotifications")
     private var authorization: Task<Bool, Never>?
 
@@ -72,16 +76,16 @@ struct SendFailureNoticePolicy {
             let settings = await center.notificationSettings()
             switch settings.authorizationStatus {
             case .authorized, .provisional, .ephemeral:
-                status = settings.alertSetting == .enabled ? L10n.text("已允许失败通知。") : L10n.text("系统横幅未开启，请在系统通知设置中开启。")
+                statusSource = settings.alertSetting == .enabled ? L10n.snapshot("已允许失败通知。") : L10n.snapshot("系统横幅未开启，请在系统通知设置中开启。")
                 return true
             case .notDetermined:
                 do {
                     let granted = try await center.requestAuthorization(options: [.alert, .sound])
-                    status = granted ? L10n.text("已允许失败通知。") : L10n.text("系统通知未允许，请在系统通知设置中开启闪传。")
+                    statusSource = granted ? L10n.snapshot("已允许失败通知。") : L10n.snapshot("系统通知未允许，请在系统通知设置中开启闪传。")
                     return granted
-                } catch { status = L10n.text("通知授权请求失败，请在系统通知设置中检查闪传。"); return false }
+                } catch { statusSource = L10n.snapshot("通知授权请求失败，请在系统通知设置中检查闪传。"); return false }
             default:
-                status = L10n.text("系统通知未允许，请在系统通知设置中开启闪传。")
+                statusSource = L10n.snapshot("系统通知未允许，请在系统通知设置中开启闪传。")
                 return false
             }
         }
@@ -105,7 +109,7 @@ struct SendFailureNoticePolicy {
                 try await UNUserNotificationCenter.current().add(request)
                 logger.info("Failure notification submitted")
             }
-            catch { status = L10n.text("失败通知未能提交，请在系统通知设置中检查闪传。") }
+            catch { statusSource = L10n.snapshot("失败通知未能提交，请在系统通知设置中检查闪传。") }
         }
     }
 

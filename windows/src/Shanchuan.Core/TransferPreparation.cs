@@ -52,15 +52,15 @@ public static class TransferPreparationService
 
         if (entry.Kind != HistoryKind.Text)
         {
-            if (entry.Paths.Count == 0) throw new InvalidDataException(L.T("没有可发送的文件。"));
+            if (entry.Paths.Count == 0) throw L.WithDescription(new InvalidDataException(L.T("没有可发送的文件。")), L.M("没有可发送的文件。"));
             foreach (var sourcePath in entry.Paths)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 var path = Path.GetFullPath(sourcePath);
                 var isDirectory = Directory.Exists(path);
-                if (!isDirectory && !File.Exists(path)) throw new FileNotFoundException(L.T("要发送的文件或文件夹不存在。"), path);
+                if (!isDirectory && !File.Exists(path)) throw L.WithDescription(new FileNotFoundException(L.T("要发送的文件或文件夹不存在。"), path), L.M("要发送的文件或文件夹不存在。"));
                 if ((File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0)
-                    throw new InvalidDataException(L.T("不支持直接发送符号链接或联接点，请选择实际文件或文件夹。"));
+                    throw L.WithDescription(new InvalidDataException(L.T("不支持直接发送符号链接或联接点，请选择实际文件或文件夹。")), L.M("不支持直接发送符号链接或联接点，请选择实际文件或文件夹。"));
 
                 var name = isDirectory ? new DirectoryInfo(path).Name : Path.GetFileName(path);
                 Require(ProtocolValidation.ValidateName(name));

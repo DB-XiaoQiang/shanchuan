@@ -134,17 +134,27 @@ internal static class Program
         var settings = new AppSettings { NetworkMode = NetworkMode.Unconfigured, Username = "gui-smoke-fixture", ReceiveIntervalSeconds = 600, TtlDays = 90, StartWithWindows = false };
         settings.Shortcuts.Enabled = false;
         new SettingsStore(AppData).Save(settings);
-        // The baseline is an unmodified historical application. Seed its real
-        // settings schema: newer fields would be discarded when that old GUI
-        // saves before installing, which is unrelated to preservation by the
-        // target version. Keep the byte-for-byte preservation assertion below.
+        // Seed the schema supported by the unmodified baseline. Versions before
+        // 0.2.0 would discard the language field when saving before installation;
+        // newer baselines already support it and must preserve the seeded value.
+        // Keep the byte-for-byte preservation assertion below in either case.
         var settingsPath = Path.Combine(AppData, "settings.json");
-        var legacySettings = JsonNode.Parse(File.ReadAllText(settingsPath))!.AsObject();
-        Require(legacySettings.Remove("language"), "Current fixture settings are missing the new language field.");
-        File.WriteAllText(settingsPath, legacySettings.ToJsonString(JsonOptions));
-        Require(!JsonNode.Parse(File.ReadAllText(settingsPath))!.AsObject().ContainsKey("language"),
-            "Historical GUI fixture must not contain unsupported language settings.");
-        Checks.Add("historical-settings-schema-without-new-language-field");
+        if (UpdateManifestVerifier.CompareVersions(BaseVersion, "0.2.0") < 0)
+        {
+            var legacySettings = JsonNode.Parse(File.ReadAllText(settingsPath))!.AsObject();
+            Require(legacySettings.Remove("language"), "Current fixture settings are missing the new language field.");
+            File.WriteAllText(settingsPath, legacySettings.ToJsonString(JsonOptions));
+            Require(!JsonNode.Parse(File.ReadAllText(settingsPath))!.AsObject().ContainsKey("language"),
+                "Historical GUI fixture must not contain unsupported language settings.");
+            Checks.Add("historical-settings-schema-without-new-language-field");
+        }
+        else
+        {
+            var currentSettings = JsonNode.Parse(File.ReadAllText(settingsPath))!.AsObject();
+            Require(currentSettings["language"]?.GetValue<string>() == Localization.DefaultLanguage,
+                "Supported language setting must remain Simplified Chinese in the baseline fixture.");
+            Checks.Add("supported-settings-schema-retains-default-chinese-language-field");
+        }
         var historyStore = new HistoryStore(AppData);
         Directory.CreateDirectory(historyStore.MediaDirectory);
         var media = Path.Combine(historyStore.MediaDirectory, "fixture.png");

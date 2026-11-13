@@ -4,12 +4,15 @@ import CopyToolCore
 
 /// 独立的大编辑区直接编辑同一份设置草稿，自动保存仍由配置页面统一负责。
 struct DirectoryExclusionEditorView: View {
+    @ObservedObject private var appLanguage = AppLanguageStore.shared
     @Binding var rules: String
     let saveStatus: SettingsAutosaveStore.Status
+    var saveStatusText: (() -> String)? = nil
     let addCommonRules: () -> Void
     let finishEditing: () -> Void
 
     var body: some View {
+        let _ = appLanguage.language
         VStack(alignment: .leading, spacing: 14) {
             Text(L10n.text("编辑目录排除规则")).font(.title2).bold()
             Text(L10n.text("每行一条，修改后自动保存。留空发送全部内容；直接发送单个文件不受影响。"))
@@ -33,7 +36,7 @@ struct DirectoryExclusionEditorView: View {
                     .accessibilityIdentifier("exclusion-editor-error")
             }
             HStack {
-                Text(saveStatus.text).font(.caption)
+                Text(saveStatusText?() ?? saveStatus.text).font(.caption)
                     .foregroundStyle(saveFailed ? .red : .secondary)
                     .accessibilityIdentifier("exclusion-editor-save-status")
                 Spacer()

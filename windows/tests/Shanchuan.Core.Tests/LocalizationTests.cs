@@ -94,4 +94,72 @@ public sealed class LocalizationTests
         }
         finally { Localization.Configure(previous); }
     }
+
+    [Fact]
+    public void ExistingMessageRendersBothLanguagesWithoutRewritingOpaqueArguments()
+    {
+        const string userContent = "就绪{0}.zip";
+        var message = Localization.M("已加入发送队列：") + userContent;
+        Assert.Equal("已加入发送队列：" + userContent, message.Render("zh-Hans"));
+        Assert.Equal("Added to send queue: " + userContent, message.Render("en"));
+        var nested = Localization.MF($"已捕获新的剪贴板{Localization.M("图片")}，正在加入发送队列…");
+        Assert.Contains("Image", nested.Render("en"));
+        Assert.Contains("图片", nested.Render("zh-Hans"));
+        Assert.Equal("就绪", Localization.Describe(new Exception("就绪")).Render("en"));
+        var ownError = Localization.WithDescription(new InvalidDataException("更新清单签名验证失败。"), Localization.M("更新清单签名验证失败。"));
+        Assert.Equal("The update manifest signature could not be verified.", Localization.Describe(ownError).Render("en"));
+    }
+
+    [Fact]
+    public void RuntimeChangesNotifyOnceAndDoNotMutateProgressOrHistoricalText()
+    {
+        var previous = Localization.CurrentLanguage;
+        Localization.Configure("zh-Hans");
+        var changes = 0;
+        void Changed() => changes++;
+        Localization.LanguageChanged += Changed;
+        try
+        {
+            var progress = new TransferProgressSnapshot(Guid.NewGuid(), TransferPhase.Uploading, "正在上传",
+                Fraction: .25, UploadedBytes: 25, TotalBytes: 100, CurrentItemMessage: Localization.M("正在上传"));
+            var log = new TransferLogEntry { Message = "正在上传" };
+            Localization.Configure("en");
+            Assert.Equal("Uploading", progress.DisplayCurrentItem);
+            Assert.Equal("正在上传", progress.DisplayTitle);
+            Assert.Equal("正在上传", log.Message);
+            Assert.Equal(.25, progress.Fraction);
+            Localization.Configure("en");
+            Assert.Equal(1, changes);
+            Localization.Configure("zh-Hans");
+            Assert.Equal("正在上传", progress.DisplayCurrentItem);
+            Assert.Equal(2, changes);
+        }
+        finally { Localization.LanguageChanged -= Changed; Localization.Configure(previous); }
+    }
+
+    [Fact]
+    public void ExistingUpdateCoordinatorLocalizesWithoutCheckingOrRecreatingState()
+    {
+        var previous = Localization.CurrentLanguage;
+        var root = Path.Combine(Path.GetTempPath(), "shanchuan-live-language-" + Guid.NewGuid().ToString("N"));
+        var settingsRequests = 0;
+        try
+        {
+            Localization.Configure("zh-Hans");
+            using var updates = new UpdateCoordinator(root, "0.2.0", () => { settingsRequests++; return new AppSettings(); }, () => "", () => false);
+            var state = updates.State;
+            var events = 0;
+            updates.Changed += _ => events++;
+            Assert.Equal("等待检查更新", updates.Snapshot.Status);
+            Localization.Configure("en");
+            Assert.Equal("Waiting to check for updates", updates.Snapshot.Status);
+            Localization.Configure("zh-Hans");
+            Assert.Equal("等待检查更新", updates.Snapshot.Status);
+            Assert.Same(state, updates.State);
+            Assert.Equal(0, settingsRequests);
+            Assert.Equal(0, events);
+            Assert.Null(updates.State.LastCheckedAt);
+        }
+        finally { Localization.Configure(previous); if (Directory.Exists(root)) Directory.Delete(root, true); }
+    }
 }

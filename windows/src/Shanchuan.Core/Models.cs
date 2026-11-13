@@ -79,8 +79,14 @@ public sealed record TransferProgressSnapshot(
     long UploadedBytes = 0,
     long TotalBytes = 0,
     int QueuedCount = 0,
-    string Detail = "")
+    string Detail = "",
+    LocalizedText? CurrentItemMessage = null,
+    LocalizedText? DetailMessage = null,
+    LocalizedText? TitleMessage = null)
 {
+    public string DisplayCurrentItem => CurrentItemMessage?.ToString() ?? CurrentItem;
+    public string DisplayDetail => DetailMessage?.ToString() ?? Detail;
+    public string DisplayTitle => TitleMessage?.ToString() ?? Title;
     public bool IsActive => Phase is TransferPhase.Preparing or TransferPhase.Uploading
         or TransferPhase.Publishing or TransferPhase.Cancelling;
 

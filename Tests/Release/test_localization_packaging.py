@@ -97,7 +97,7 @@ class LocalizationPackagingTests(unittest.TestCase):
 
     def test_all_mac_localized_literals_have_complete_translations_and_formats(self):
         chinese, english = localizations.validate_core_resources(ROOT / 'Sources/CopyToolCore/Resources')
-        literal_call = re.compile(r'L10n\.(?:text|format)\(\s*("(?:[^"\\]|\\.)*")')
+        literal_call = re.compile(r'L10n\.(?:text|format|snapshot|snapshotFormat|snapshotCompose|compose)\(\s*("(?:[^"\\]|\\.)*")')
         for source in (ROOT / 'Sources').rglob('*.swift'):
             for match in literal_call.finditer(source.read_text()):
                 key = json.loads(match[1])

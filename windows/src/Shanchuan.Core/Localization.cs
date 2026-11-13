@@ -12,19 +12,22 @@ public static class Localization
     private static readonly IReadOnlyDictionary<string, string> ChineseTable = Load(DefaultLanguage);
     private static readonly IReadOnlyDictionary<string, string> EnglishTable = Load(English);
     public static string CurrentLanguage { get; private set; } = DefaultLanguage;
+    public static event Action? LanguageChanged;
     public static IReadOnlyList<string> SupportedLanguages { get; } = [DefaultLanguage, English];
 
     public static string NormalizeLanguage(string? language) => language == English ? English : DefaultLanguage;
 
-    /// <summary>Call once before constructing windows and services. Changing the saved choice requires restart.</summary>
+    /// <summary>Updates presentation culture without restarting application services.</summary>
     public static void Configure(string? language)
     {
+        var previous = CurrentLanguage;
         CurrentLanguage = NormalizeLanguage(language);
         var culture = CultureInfo.GetCultureInfo(CurrentLanguage);
         CultureInfo.CurrentCulture = culture;
         CultureInfo.CurrentUICulture = culture;
         CultureInfo.DefaultThreadCurrentCulture = culture;
         CultureInfo.DefaultThreadCurrentUICulture = culture;
+        if (previous != CurrentLanguage) LanguageChanged?.Invoke();
     }
 
     public static string T(string key) => Translate(key, CurrentLanguage);
@@ -33,6 +36,17 @@ public static class Localization
 
     public static string F(FormattableString message) =>
         Format(message.Format, CurrentLanguage, message.GetArguments());
+
+    public static LocalizedText M(string key) => LocalizedText.Key(key);
+    public static LocalizedText MF(FormattableString message) => LocalizedText.Formatted(message);
+    private const string ExceptionMessageKey = "Shanchuan.LocalizedMessage";
+    public static TException WithDescription<TException>(TException error, LocalizedText message) where TException : Exception
+    {
+        error.Data[ExceptionMessageKey] = message;
+        return error;
+    }
+    public static LocalizedText Describe(Exception error) =>
+        error.Data[ExceptionMessageKey] is LocalizedText message ? message : LocalizedText.Raw(error.Message);
 
     public static string Format(string key, string? language, params object?[] arguments) =>
         string.Format(CultureInfo.GetCultureInfo(NormalizeLanguage(language)), Translate(key, language), arguments);

@@ -20,6 +20,8 @@ public partial class ProgressWindow : Window
         _viewModel = viewModel;
         DataContext = viewModel;
         _viewModel.PropertyChanged += OnPropertyChanged;
+        L.LanguageChanged += OnLanguageChanged;
+        Closed += (_, _) => { L.LanguageChanged -= OnLanguageChanged; _viewModel.PropertyChanged -= OnPropertyChanged; };
         _hideTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(3) };
         _hideTimer.Tick += (_, _) => { _hideTimer.Stop(); Hide(); };
         Closing += OnClosing;
@@ -39,10 +41,12 @@ public partial class ProgressWindow : Window
 
     private void OnPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName == nameof(AppViewModel.Progress)) Dispatcher.BeginInvoke(Render);
+        if (e.PropertyName == nameof(AppViewModel.Progress)) Dispatcher.BeginInvoke(new Action(() => Render()));
     }
 
-    private void Render()
+    private void OnLanguageChanged() => Dispatcher.Invoke(() => Render(updateVisibility: false));
+
+    private void Render(bool updateVisibility = true)
     {
         var progress = _viewModel.Progress;
         if (_lastTransferId != progress.Id)
@@ -63,14 +67,16 @@ public partial class ProgressWindow : Window
             TransferPhase.Cancelled => L.T("已取消"),
             _ => L.T("闪传")
         };
-        TitleText.Text = progress.Title;
-        DetailText.Text = string.Join(" · ", new[] { progress.CurrentItem, progress.Detail }.Where(text => !string.IsNullOrWhiteSpace(text)));
+        TitleText.Text = progress.DisplayTitle;
+        DetailText.Text = string.Join(" · ", new[] { progress.DisplayCurrentItem, progress.DisplayDetail }.Where(text => !string.IsNullOrWhiteSpace(text)));
         UploadProgress.IsIndeterminate = progress.IsActive && !progress.Fraction.HasValue;
         UploadProgress.Value = (progress.Fraction ?? 0) * 100;
         PercentText.Text = progress.Fraction.HasValue ? $"{progress.Fraction.Value:P0}" : "";
         BytesText.Text = progress.TotalBytes > 0 ? $"{FormatBytes(progress.UploadedBytes)} / {FormatBytes(progress.TotalBytes)}" : "";
         QueueText.Text = progress.QueuedCount > 0 ? L.F($"后面还有 {progress.QueuedCount} 个等待任务") : "";
         HideButton.IsEnabled = true;
+
+        if (!updateVisibility) return;
 
         if (!_viewModel.Settings.ShowTransferProgress) { Hide(); return; }
         if (progress.IsActive)

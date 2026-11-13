@@ -4,6 +4,7 @@ import UniformTypeIdentifiers
 import CopyToolCore
 
 struct RootView: View {
+    @ObservedObject private var appLanguage = AppLanguageStore.shared
     @ObservedObject var model: AppModel
     @ObservedObject var updates: UpdateCoordinator
     @ObservedObject var navigation: AppNavigation
@@ -12,6 +13,7 @@ struct RootView: View {
     @State private var showClear = false
     @State private var dropped = false
     var body: some View {
+        let _ = appLanguage.language
         NavigationSplitView {
             List(selection: Binding(get: { navigation.page }, set: { navigation.select($0) })) {
                 Label(L10n.text("剪贴板记录"), systemImage: "doc.on.clipboard").tag(AppNavigation.Page.history)
@@ -121,7 +123,7 @@ struct RootView: View {
             if !model.activeTransfer.isEmpty {
                 HStack {
                     VStack(alignment: .leading) {
-                        Text(L10n.format("发送：%@", String(describing: model.privacy ? L10n.text("文件传输") : model.activeTransfer))).lineLimit(1)
+                        Text(L10n.format("发送：%@", String(describing: model.privacy ? L10n.text("文件传输") : model.localizedActiveTransfer))).lineLimit(1)
                         if let value = model.transferSnapshot.fraction {
                             ProgressView(value: value)
                         } else { ProgressView().controlSize(.small) }
@@ -203,9 +205,11 @@ struct RootView: View {
     }
 }
 struct HistoryRow: View {
+    @ObservedObject private var appLanguage = AppLanguageStore.shared
     let entry: HistoryEntry
     let privacy: Bool
     var body: some View {
+        let _ = appLanguage.language
         HStack(alignment: .top, spacing: 10) {
             Image(systemName: entry.kind == .text ? "text.alignleft" : (entry.kind == .image ? "photo" : "doc"))
                 .foregroundStyle(.blue).frame(width: 22).padding(.top, 2)

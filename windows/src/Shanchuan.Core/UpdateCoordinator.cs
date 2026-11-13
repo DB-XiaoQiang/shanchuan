@@ -53,14 +53,14 @@ public sealed class UpdateCoordinator : IDisposable
     private DateTimeOffset? _lastInternalPoll;
     private bool _loaded;
     private bool _disposed;
-    private string _status = L.T("等待检查更新");
-    private string _relayStatus = "";
+    private LocalizedText _status = L.M("等待检查更新");
+    private LocalizedText _relayStatus = "";
 
     public UpdateCoordinator(string root, string currentVersion, Func<AppSettings> getSettings, Func<string> getPassword,
         Func<bool> isBusy, UpdateManifestVerifier? verifier = null, IUpdateSource? source = null,
         IUpdateRelay? transport = null, Func<DateTimeOffset>? clock = null, SemaphoreSlim? transferGate = null)
     {
-        if (!UpdateManifestVerifier.IsVersion(currentVersion)) throw new ArgumentException(L.T("当前版本无效。"), nameof(currentVersion));
+        if (!UpdateManifestVerifier.IsVersion(currentVersion)) throw new ArgumentException(L.M("当前版本无效。"), nameof(currentVersion));
         _currentVersion = currentVersion;
         _getSettings = getSettings;
         _getPassword = getPassword;
@@ -73,12 +73,14 @@ public sealed class UpdateCoordinator : IDisposable
         _statePath = Path.Combine(root, "Updates", "update-state.json");
         try { State = File.Exists(_statePath) ? JsonFileStore.Read<UpdateState>(_statePath) : new UpdateState(); }
         catch (Exception error) when (error is IOException or System.Text.Json.JsonException or UnauthorizedAccessException)
-        { State = new UpdateState(); _status = L.T("更新状态无法读取，将重新检查"); }
+        { State = new UpdateState(); _status = L.M("更新状态无法读取，将重新检查"); }
         Snapshot = new UpdateSnapshot(_currentVersion, null, _status, "", false, false, "");
     }
 
     public UpdateState State { get; }
-    public UpdateSnapshot Snapshot { get; private set; }
+    private UpdateSnapshot _snapshot = null!;
+    public UpdateSnapshot Snapshot { get => _snapshot with { Status = _status.ToString(), RelayStatus = _relayStatus.ToString() }; private set => _snapshot = value; }
+    public LocalizedText StatusText => _status;
     public bool IsBusy => Snapshot.IsWorking;
     public event Action<UpdateSnapshot>? Changed;
     public event Action<string>? Log;
@@ -101,10 +103,10 @@ public sealed class UpdateCoordinator : IDisposable
                     {
                         _candidate = await _cache.LoadAsync(directory, token).ConfigureAwait(false);
                         if (UpdateManifestVerifier.CompareVersions(_candidate.Manifest.Version, _currentVersion) < 0) _candidate = null;
-                        _status = _candidate is null ? L.T("当前已是最新版本") : ReadyStatus();
+                        _status = _candidate is null ? L.M("当前已是最新版本") : ReadyStatus();
                     }
                     catch (Exception error) when (error is not OperationCanceledException)
-                    { State.CandidateCacheDirectory = null; _status = L.T("更新缓存校验失败，请重试"); }
+                    { State.CandidateCacheDirectory = null; _status = L.M("更新缓存校验失败，请重试"); }
                 }
                 Publish(false);
             }
@@ -113,7 +115,7 @@ public sealed class UpdateCoordinator : IDisposable
             var now = _clock();
             if (settings.NetworkMode == NetworkMode.Unconfigured)
             {
-                _status = L.T("请先选择网络位置");
+                _status = L.M("请先选择网络位置");
                 Publish(false);
                 return;
             }
@@ -140,7 +142,7 @@ public sealed class UpdateCoordinator : IDisposable
 
     private async Task CheckExternalAsync(string window, AppSettings settings, string password, DateTimeOffset now, CancellationToken token)
     {
-        _status = L.T("检查中");
+        _status = L.M("检查中");
         Publish(true);
         try
         {
@@ -148,22 +150,22 @@ public sealed class UpdateCoordinator : IDisposable
             if (release is not null)
             {
                 var manifest = _verifier.Verify(release.ManifestBytes, release.Signature);
-                if (release.Tag != "v" + manifest.Version) throw new InvalidDataException(L.T("GitHub 标签与签名版本不匹配。"));
+                if (release.Tag != "v" + manifest.Version) throw new InvalidDataException(L.M("GitHub 标签与签名版本不匹配。"));
                 RequireNotOlder(manifest.Version);
-                _status = L.T("下载中");
+                _status = L.M("下载中");
                 Publish(true);
                 _candidate = await _cache.ImportAsync(release.ManifestBytes, release.Signature,
                     (asset, destination, ct) => _source.DownloadAssetAsync(release.Tag, asset, destination, ct), token).ConfigureAwait(false);
                 AcceptCandidate(_candidate);
                 _status = ReadyStatus();
             }
-            else _status = _candidate is null ? L.T("当前无正式更新") : ReadyStatus();
+            else _status = _candidate is null ? L.M("当前无正式更新") : ReadyStatus();
             State.LastSuccessfulWindow = window;
             CheckSucceeded(now);
         }
         catch (Exception error) when (error is not OperationCanceledException)
         {
-            _status = L.T("检查失败：") + SafeError(error, settings, password);
+            _status = L.M("检查失败：") + SafeError(error, settings, password);
             CheckFailed(now);
             Log?.Invoke(_status);
         }
@@ -171,7 +173,7 @@ public sealed class UpdateCoordinator : IDisposable
 
     private async Task ReceiveInternalAsync(AppSettings settings, string password, DateTimeOffset now, CancellationToken token)
     {
-        _status = L.T("检查中");
+        _status = L.M("检查中");
         Publish(true);
         try
         {
@@ -183,13 +185,13 @@ public sealed class UpdateCoordinator : IDisposable
                 _candidate = candidate;
                 AcceptCandidate(candidate);
             }
-            _status = _candidate is null ? L.T("当前无内网更新") : ReadyStatus();
-            _relayStatus = L.T("更新来自 FTP，只读接收");
+            _status = _candidate is null ? L.M("当前无内网更新") : ReadyStatus();
+            _relayStatus = L.M("更新来自 FTP，只读接收");
             CheckSucceeded(now);
         }
         catch (Exception error) when (error is not OperationCanceledException)
         {
-            _status = L.T("检查失败：") + SafeError(error, settings, password);
+            _status = L.M("检查失败：") + SafeError(error, settings, password);
             CheckFailed(now);
             Log?.Invoke(_status);
         }
@@ -200,26 +202,26 @@ public sealed class UpdateCoordinator : IDisposable
         var candidate = _candidate!;
         var endpoint = settings.Host.Trim() + "|" + settings.Port + "|" + settings.Username + "|" + settings.Directory;
         var key = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(endpoint))) + ":" + candidate.ManifestHash;
-        if (State.RelayedKey == key) { _relayStatus = L.T("已投递更新包"); return; }
-        _relayStatus = L.T("等待转发");
+        if (State.RelayedKey == key) { _relayStatus = L.M("已投递更新包"); return; }
+        _relayStatus = L.M("等待转发");
         Publish(true);
         try
         {
             if (settings.ValidateForTransfer() is { } error) throw new InvalidDataException(error);
             _candidate = candidate = await _cache.LoadAsync(candidate.CacheDirectory, token).ConfigureAwait(false);
-            _relayStatus = L.T("转发中");
+            _relayStatus = L.M("转发中");
             Publish(true);
             await _relay.RelayAsync(candidate, settings, password, token).ConfigureAwait(false);
             State.RelayedKey = key;
             State.RelayFailures = 0;
             State.NextRelayAttemptUtc = null;
-            _relayStatus = L.T("已投递更新包");
+            _relayStatus = L.M("已投递更新包");
             Save();
-            Log?.Invoke(L.T("已将 Windows 更新包投递 FTP，版本 ") + candidate.Manifest.Version + L.T("；不表示内网已安装。"));
+            Log?.Invoke(L.M("已将 Windows 更新包投递 FTP，版本 ") + candidate.Manifest.Version + L.M("；不表示内网已安装。"));
         }
         catch (Exception error) when (error is not OperationCanceledException)
         {
-            _relayStatus = L.T("转发失败：") + SafeError(error, settings, password);
+            _relayStatus = L.M("转发失败：") + SafeError(error, settings, password);
             State.RelayFailures = Math.Min(State.RelayFailures + 1, 4);
             State.NextRelayAttemptUtc = now + UpdateSchedule.Backoff(State.RelayFailures);
             Save();
@@ -248,9 +250,9 @@ public sealed class UpdateCoordinator : IDisposable
     {
         if (UpdateManifestVerifier.CompareVersions(version, _currentVersion) < 0 ||
             (UpdateManifestVerifier.IsVersion(State.HighestSeenVersion) && UpdateManifestVerifier.CompareVersions(version, State.HighestSeenVersion!) < 0))
-            throw new InvalidDataException(L.T("拒绝旧版本回放或降级。"));
+            throw new InvalidDataException(L.M("拒绝旧版本回放或降级。"));
     }
-    private string ReadyStatus() => _candidate is not null && UpdateManifestVerifier.CompareVersions(_candidate.Manifest.Version, _currentVersion) > 0 ? L.T("可安装") : L.T("当前已是最新版本");
+    private LocalizedText ReadyStatus() => _candidate is not null && UpdateManifestVerifier.CompareVersions(_candidate.Manifest.Version, _currentVersion) > 0 ? L.M("可安装") : L.M("当前已是最新版本");
     private void CheckSucceeded(DateTimeOffset now)
     {
         State.LastCheckedAt = now;
@@ -273,12 +275,12 @@ public sealed class UpdateCoordinator : IDisposable
             _candidate?.Manifest.ReleaseNotes ?? "");
         if (!_disposed) Changed?.Invoke(Snapshot);
     }
-    private static string SafeError(Exception error, AppSettings settings, string password)
+    private static LocalizedText SafeError(Exception error, AppSettings settings, string password) => LocalizedText.Live(() =>
     {
-        var text = error.Message;
+        var text = L.Describe(error).ToString();
         if (!string.IsNullOrEmpty(password)) text = text.Replace(password, "***", StringComparison.Ordinal);
         if (!string.IsNullOrEmpty(settings.Username)) text = text.Replace(settings.Username, "***", StringComparison.Ordinal);
         return text.Replace('\r', ' ').Replace('\n', ' ');
-    }
+    });
     public void Dispose() { _disposed = true; _lifetime.Cancel(); }
 }
