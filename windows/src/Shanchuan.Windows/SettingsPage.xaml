@@ -109,9 +109,14 @@
                     <StackPanel>
                         <TextBlock Text="目录排除规则" FontSize="18" FontWeight="SemiBold" />
                         <TextBlock Text="每行一条；末尾 / 只排除文件夹，支持 *、?、** 和相对路径。" TextWrapping="Wrap" Foreground="#667085" Margin="0,5,0,6" />
-                        <TextBox x:Name="ExclusionRules" Text="{Binding Settings.DirectoryExclusionRules, UpdateSourceTrigger=PropertyChanged}" TextChanged="SettingChanged"
-                                 AcceptsReturn="True" AcceptsTab="True" Height="105" VerticalContentAlignment="Top" FontFamily="Consolas" />
-                        <Button Content="添加常用规则" Click="AddCommonRules" HorizontalAlignment="Left" Margin="0,6,0,0" />
+                        <TextBox x:Name="ExclusionRulesPreview" AutomationProperties.AutomationId="DirectoryRulesPreview"
+                                 Text="{Binding Settings.DirectoryExclusionRules, Mode=OneWay}" IsReadOnly="True"
+                                 Height="68" VerticalContentAlignment="Top" FontFamily="Consolas" TextWrapping="NoWrap"
+                                 ToolTip="这里显示规则预览；点击“展开编辑…”查看和修改全部规则。" />
+                        <StackPanel Orientation="Horizontal" Margin="-4,4,0,0">
+                            <Button Content="展开编辑…" AutomationProperties.AutomationId="OpenDirectoryRules" Click="OpenDirectoryRules" />
+                            <Button Content="添加常用规则" AutomationProperties.AutomationId="AddCommonDirectoryRules" Click="AddCommonRules" />
+                        </StackPanel>
                     </StackPanel>
                 </Border>
 

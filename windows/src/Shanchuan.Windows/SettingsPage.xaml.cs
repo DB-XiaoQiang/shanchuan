@@ -15,6 +15,7 @@ public partial class SettingsPage : System.Windows.Controls.UserControl
 {
     private readonly AppViewModel _viewModel;
     private readonly bool _initializing;
+    private DirectoryRulesWindow? _rulesEditor;
 
     public SettingsPage(AppViewModel viewModel)
     {
@@ -121,19 +122,46 @@ public partial class SettingsPage : System.Windows.Controls.UserControl
 
     private void AddCommonRules(object sender, RoutedEventArgs e)
     {
-        string[] common = [".git/", "node_modules/", "target/", "dist/", "*.log"];
-        var lines = ExclusionRules.Text.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries)
-            .Select(line => line.Trim()).ToHashSet(StringComparer.Ordinal);
-        foreach (var rule in common) lines.Add(rule);
-        ExclusionRules.SetCurrentValue(TextBox.TextProperty, string.Join(Environment.NewLine, lines));
-        ExclusionRules.GetBindingExpression(TextBox.TextProperty)?.UpdateSource();
+        if (_rulesEditor is not null)
+        {
+            _rulesEditor.AddCommonRules();
+            return;
+        }
+        _viewModel.Settings.DirectoryExclusionRules = DirectoryRulesWindow.AppendCommonRules(_viewModel.Settings.DirectoryExclusionRules);
+        RefreshRulesPreview();
         _viewModel.SettingsEdited();
     }
+
+    private void OpenDirectoryRules(object sender, RoutedEventArgs e)
+    {
+        if (_rulesEditor is not null)
+        {
+            if (_rulesEditor.WindowState == WindowState.Minimized) _rulesEditor.WindowState = WindowState.Normal;
+            _rulesEditor.Activate();
+            return;
+        }
+        var editor = new DirectoryRulesWindow(_viewModel) { Owner = Window.GetWindow(this) };
+        _rulesEditor = editor;
+        editor.RulesChanged += (_, _) => RefreshRulesPreview();
+        editor.Closed += (_, _) =>
+        {
+            _rulesEditor = null;
+            RefreshRulesPreview();
+        };
+        editor.Show();
+    }
+
+    private void RefreshRulesPreview() => ExclusionRulesPreview.GetBindingExpression(TextBox.TextProperty)?.UpdateTarget();
 
     /// Flush bindings as well as the view model: invalid numeric input otherwise
     /// leaves an older valid value in Settings and must not disappear on navigation.
     public bool TrySave()
     {
+        if (_rulesEditor?.TryFlush() == false)
+        {
+            _rulesEditor.Activate();
+            return false;
+        }
         var controls = Descendants(this).ToArray();
         foreach (var box in controls.OfType<TextBox>())
             box.GetBindingExpression(TextBox.TextProperty)?.UpdateSource();
@@ -154,6 +182,7 @@ public partial class SettingsPage : System.Windows.Controls.UserControl
             return false;
         }
         PageValidation.Visibility = Visibility.Collapsed;
+        _rulesEditor?.CloseAfterSaved();
         return true;
     }
 

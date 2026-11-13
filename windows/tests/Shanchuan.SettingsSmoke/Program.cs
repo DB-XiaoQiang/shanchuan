@@ -45,7 +45,14 @@ internal static class Program
         LoadProductionStyles(application);
         var settingsStore = new SettingsStore(dataRoot);
         var credentials = new FakeCredentials();
-        var settings = new AppSettings { NetworkMode = NetworkMode.Unconfigured, Host = "initial.example.invalid", Username = "smoke-user" };
+        var settings = new AppSettings
+        {
+            NetworkMode = NetworkMode.Unconfigured,
+            Host = "initial.example.invalid",
+            Username = "smoke-user",
+            DirectoryExclusionRules = string.Join(Environment.NewLine,
+                "# 保留原有规则", ".git/", "existing-project/private-cache/")
+        };
         var viewModel = new AppViewModel(settings, "synthetic-initial-password", settingsStore,
             new HistoryStore(dataRoot), new TransferLogStore(dataRoot), credentials,
             new FtpTransferService(), new FtpReceiveService(new ReceiveStateStore(dataRoot)), [], []);
@@ -59,6 +66,7 @@ internal static class Program
             try
             {
                 RunAssertions(application, window, viewModel, settingsStore, credentials, output);
+                RunDirectoryRulesAssertions(application, window, viewModel, settingsStore, output);
                 await RunUpdateFeedbackAssertionsAsync(application, window, viewModel, dataRoot);
                 File.WriteAllText(Path.Combine(output, "settings-smoke-report.json"), JsonSerializer.Serialize(new
                 {
@@ -66,6 +74,7 @@ internal static class Program
                     version = AppUpdateService.InstalledVersion,
                     checks = Checks,
                     screenshot = "settings-page.png",
+                    directoryRulesScreenshot = "directory-rules-editor.png",
                     ftpWorkersStarted = false,
                     systemCredentialStoreUsed = false
                 }, new JsonSerializerOptions { WriteIndented = true }));
@@ -92,6 +101,79 @@ internal static class Program
         }), DispatcherPriority.ApplicationIdle);
         application.Run(window);
         return exitCode;
+    }
+
+    private static void RunDirectoryRulesAssertions(Application application, MainWindow window,
+        AppViewModel viewModel, SettingsStore settingsStore, string output)
+    {
+        Click(window, "SettingsNav");
+        var page = Find<SettingsPage>(window, "SettingsPageRoot");
+        var preview = Find<TextBox>(page, "DirectoryRulesPreview");
+        var original = viewModel.Settings.DirectoryExclusionRules;
+        Check(preview.IsReadOnly && preview.Text == original, "rule-preview-keeps-existing-config");
+        Click(page, "OpenDirectoryRules");
+        var editor = application.Windows.OfType<DirectoryRulesWindow>().Single();
+        var text = Find<TextBox>(editor, "DirectoryRulesEditor");
+        Check(editor.Owner == window && ReferenceEquals(editor.DataContext, viewModel),
+            "rule-editor-is-owned-by-main-window-and-shares-settings");
+        Check(editor.ResizeMode == ResizeMode.CanResize && text.ActualHeight > preview.ActualHeight &&
+              text.AcceptsReturn && text.HorizontalScrollBarVisibility == ScrollBarVisibility.Auto &&
+              text.VerticalScrollBarVisibility == ScrollBarVisibility.Auto,
+            "rule-editor-provides-larger-resizable-multiline-workspace");
+        var originalEditorHeight = text.ActualHeight;
+        editor.Height += 80;
+        Pump();
+        Check(text.ActualHeight > originalEditorHeight, "resizing-rule-window-expands-editing-area");
+        Click(page, "OpenDirectoryRules");
+        Check(application.Windows.OfType<DirectoryRulesWindow>().Single() == editor,
+            "reopening-visible-rule-editor-reuses-window");
+
+        var longRule = "project/" + string.Concat(Enumerable.Repeat("long-directory-segment/", 15)) + "*.cache";
+        var expanded = original + Environment.NewLine + longRule + Environment.NewLine + string.Join(Environment.NewLine,
+            Enumerable.Range(1, 100).Select(index => $"synthetic/project-{index}/build/**"));
+        text.SetCurrentValue(TextBox.TextProperty, expanded);
+        Pump();
+        Check(viewModel.Settings.DirectoryExclusionRules == expanded && preview.Text == expanded,
+            "long-rule-input-updates-shared-settings-and-preview");
+        Check(text.ExtentWidth > text.ViewportWidth && text.ExtentHeight > text.ViewportHeight,
+            "long-rule-list-scrolls-in-both-directions");
+        Click(editor, "EditorAddCommonRules");
+        var withCommon = text.Text;
+        Check(withCommon.StartsWith(expanded, StringComparison.Ordinal) && withCommon.Contains("node_modules/"),
+            "adding-common-rules-preserves-original-and-long-input");
+        Click(page, "AddCommonDirectoryRules");
+        Check(text.Text == withCommon, "common-rules-are-idempotent-across-page-and-editor");
+        Capture(editor, Path.Combine(output, "directory-rules-editor.png"));
+
+        // Close immediately after an edit: no lost-focus event or autosave delay
+        // is required for the final line to reach the persisted settings.
+        var final = withCommon + Environment.NewLine + "last-keystroke-before-close.tmp";
+        text.SetCurrentValue(TextBox.TextProperty, final);
+        Click(editor, "CompleteDirectoryRules");
+        Check(application.Windows.Count == 1 && settingsStore.Load().DirectoryExclusionRules == final,
+            "rule-editor-completion-persists-final-input-and-closes");
+        Check(preview.Text == final && preview.GetBindingExpression(TextBox.TextProperty) is not null,
+            "preview-retains-binding-after-rule-editor-closes");
+        Click(page, "OpenDirectoryRules");
+        var reopened = application.Windows.OfType<DirectoryRulesWindow>().Single();
+        var reopenedText = Find<TextBox>(reopened, "DirectoryRulesEditor");
+        Check(reopenedText.Text == final, "reopened-rule-editor-keeps-complete-saved-rules");
+        reopenedText.SetCurrentValue(TextBox.TextProperty, final + Environment.NewLine + "!unsupported-negation");
+        Click(reopened, "CompleteDirectoryRules");
+        Check(reopened.IsVisible && Find<TextBlock>(reopened, "DirectoryRulesValidation").Visibility == Visibility.Visible,
+            "invalid-rule-shows-inline-error-and-keeps-editor-open");
+        Check(settingsStore.Load().DirectoryExclusionRules == final,
+            "invalid-rule-does-not-replace-last-valid-persisted-rules");
+        Check(!window.TrySaveSettingsBeforeClose(), "invalid-rule-editor-blocks-main-window-close");
+        reopenedText.SetCurrentValue(TextBox.TextProperty, final);
+        Click(window, "HistoryNav");
+        Check(application.Windows.Count == 1 && Title(window) == "剪贴板记录",
+            "leaving-settings-saves-and-closes-owned-rule-editor");
+        Click(window, "SettingsNav");
+        Check(preview.Text == final && settingsStore.Load().DirectoryExclusionRules == final,
+            "page-navigation-keeps-full-rules-after-editor-reopens");
+        Check(application.Windows.Count == 1 && viewModel.Settings.NetworkMode == NetworkMode.Unconfigured,
+            "rule-editor-validation-keeps-network-disabled-and-no-stray-window");
     }
 
     private static void LoadProductionStyles(Application application)
@@ -289,7 +371,7 @@ internal static class Program
         encoder.Frames.Add(BitmapFrame.Create(bitmap));
         using var stream = File.Create(path);
         encoder.Save(stream);
-        Check(stream.Length > 0, "settings-page-screenshot-rendered");
+        Check(stream.Length > 0, Path.GetFileNameWithoutExtension(path) + "-screenshot-rendered");
     }
 
     private static void Check(bool success, string name)

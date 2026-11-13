@@ -63,7 +63,8 @@ struct SettingsView: View {
                     TextField("解密目录前缀", text: $autosave.draft.decryptPrefix)
                 }
                 Section("目录排除规则") {
-                    DirectoryExclusionSettingsView(rules: $autosave.draft.directoryExclusionRules)
+                    DirectoryExclusionSettingsView(rules: $autosave.draft.directoryExclusionRules,
+                        saveStatus: autosave.status, onEditingFinished: { autosave.flush() })
                 }
                 Section("本地行为") {
                     Stepper("历史保留：\(autosave.draft.ttlDays) 天", value: $autosave.draft.ttlDays, in: 1...3650)

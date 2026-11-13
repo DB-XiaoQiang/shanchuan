@@ -6,6 +6,8 @@ import SwiftUI
     weak var window: NSWindow?
     var willClose: (() -> Void)?
     func flushBeforeClose() {
+        // 大规则编辑框是附着在主窗口上的 sheet；退出应用时先提交其中的输入法组合。
+        window?.attachedSheet?.makeFirstResponder(nil)
         window?.makeFirstResponder(nil)
         willClose?()
     }
