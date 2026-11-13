@@ -11,7 +11,7 @@ public struct HistoryEntry: Identifiable, Codable, Equatable, Sendable {
     public init(kind: Kind, content: String, paths: [String] = [], date: Date = Date()) {
         self.id = UUID(); self.date = date; self.kind = kind; self.content = content; self.paths = paths; self.status = "仅本地"
     }
-    public var title: String { kind == .text ? content : paths.map { URL(fileURLWithPath: $0).lastPathComponent }.joined(separator: "、") }
+    public var title: String { kind == .text ? content : paths.map { URL(fileURLWithPath: $0).lastPathComponent }.joined(separator: L10n.text("、")) }
     public func matches(query: String, kind: Kind?) -> Bool {
         (kind == nil || self.kind == kind) && (query.isEmpty || title.localizedCaseInsensitiveContains(query))
     }
@@ -58,13 +58,13 @@ public struct AppPreferences: Codable, Equatable, Sendable {
         directoryExclusionRules = try values.decodeIfPresent(String.self, forKey: .directoryExclusionRules) ?? directoryExclusionRules
     }
     public var validationError: String? {
-        if host.isEmpty { return "请填写 FTP 服务器地址" }
-        if host.contains(where: { $0.isWhitespace }) || host.contains("://") || host.contains("/") { return "服务器地址只能填写主机名或 IP" }
-        if !(1...65535).contains(port) { return "端口须为 1–65535" }
-        if username.isEmpty { return "请填写用户名" }
-        if !directory.hasPrefix("/") || directory.contains("\n") || directory.contains("\r") { return "FTP 目录须以 / 开头" }
-        if ttlDays < 1 || ttlDays > 3650 { return "历史保留天数须为 1–3650" }
-        if textRemoteName.isEmpty || textRemoteName.contains("/") || textRemoteName.contains("\n") || textRemoteName.contains("\r") { return "文本远端文件名无效" }
+        if host.isEmpty { return L10n.text("请填写 FTP 服务器地址") }
+        if host.contains(where: { $0.isWhitespace }) || host.contains("://") || host.contains("/") { return L10n.text("服务器地址只能填写主机名或 IP") }
+        if !(1...65535).contains(port) { return L10n.text("端口须为 1–65535") }
+        if username.isEmpty { return L10n.text("请填写用户名") }
+        if !directory.hasPrefix("/") || directory.contains("\n") || directory.contains("\r") { return L10n.text("FTP 目录须以 / 开头") }
+        if ttlDays < 1 || ttlDays > 3650 { return L10n.text("历史保留天数须为 1–3650") }
+        if textRemoteName.isEmpty || textRemoteName.contains("/") || textRemoteName.contains("\n") || textRemoteName.contains("\r") { return L10n.text("文本远端文件名无效") }
         do { _ = try DirectoryExclusions(directoryExclusionRules) }
         catch { return error.localizedDescription }
         return shortcuts.validationError

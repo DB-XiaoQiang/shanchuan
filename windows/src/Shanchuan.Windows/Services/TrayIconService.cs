@@ -12,11 +12,11 @@ public static class WindowsStartupService
     public static void Apply(bool enabled)
     {
         using var key = Registry.CurrentUser.OpenSubKey(RunKey, true) ??
-            throw new InvalidOperationException("无法打开当前用户的启动项注册表。");
+            throw new InvalidOperationException(L.T("无法打开当前用户的启动项注册表。"));
         if (!enabled) { key.DeleteValue("Shanchuan", false); return; }
 
         var executable = Environment.ProcessPath ?? Process.GetCurrentProcess().MainModule?.FileName ??
-            throw new InvalidOperationException("无法确定闪传程序路径。");
+            throw new InvalidOperationException(L.T("无法确定闪传程序路径。"));
         var command = string.Equals(Path.GetFileName(executable), "dotnet.exe", StringComparison.OrdinalIgnoreCase)
             ? $"\"{executable}\" \"{Path.Combine(AppContext.BaseDirectory, "Shanchuan.dll")}\""
             : $"\"{executable}\"";
@@ -32,15 +32,15 @@ public sealed class TrayIconService : IDisposable
     public TrayIconService(Action showWindow, Action exitApplication)
     {
         var executable = Environment.ProcessPath ?? Process.GetCurrentProcess().MainModule?.FileName ??
-            throw new InvalidOperationException("无法确定闪传程序路径。");
+            throw new InvalidOperationException(L.T("无法确定闪传程序路径。"));
         _nativeIcon = System.Drawing.Icon.ExtractAssociatedIcon(executable) ??
-            throw new InvalidOperationException("无法读取闪传应用图标。");
+            throw new InvalidOperationException(L.T("无法读取闪传应用图标。"));
         var menu = new System.Windows.Forms.ContextMenuStrip();
-        menu.Items.Add("打开闪传", null, (_, _) => showWindow());
-        menu.Items.Add("退出", null, (_, _) => exitApplication());
+        menu.Items.Add(L.T("打开闪传"), null, (_, _) => showWindow());
+        menu.Items.Add(L.T("退出"), null, (_, _) => exitApplication());
         _icon = new System.Windows.Forms.NotifyIcon
         {
-            Text = "闪传",
+            Text = L.T("闪传"),
             Icon = _nativeIcon,
             Visible = true,
             ContextMenuStrip = menu

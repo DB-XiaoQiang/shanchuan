@@ -16,6 +16,7 @@ using Shanchuan.Windows.ViewModels;
 using Application = System.Windows.Application;
 using Button = System.Windows.Controls.Button;
 using TextBox = System.Windows.Controls.TextBox;
+using Localization = Shanchuan.Core.Localization;
 
 namespace Shanchuan.SettingsSmoke;
 
@@ -68,6 +69,7 @@ internal static class Program
                 RunAssertions(application, window, viewModel, settingsStore, credentials, output);
                 RunDirectoryRulesAssertions(application, window, viewModel, settingsStore, output);
                 await RunUpdateFeedbackAssertionsAsync(application, window, viewModel, dataRoot);
+                RunLanguageAssertions(application, window, viewModel, settingsStore, output);
                 File.WriteAllText(Path.Combine(output, "settings-smoke-report.json"), JsonSerializer.Serialize(new
                 {
                     passed = true,
@@ -187,7 +189,86 @@ internal static class Program
             ?? throw new InvalidOperationException("Missing Application.Resources.");
         var dictionary = new XElement(presentation + "ResourceDictionary",
             new XAttribute(XNamespace.Xmlns + "x", xaml), resources.Elements());
-        application.Resources = (ResourceDictionary)XamlReader.Parse(dictionary.ToString());
+        application.Resources = (ResourceDictionary)XamlReader.Parse(dictionary.ToString()
+            .Replace("clr-namespace:Shanchuan.Windows", "clr-namespace:Shanchuan.Windows;assembly=Shanchuan", StringComparison.Ordinal));
+    }
+
+    private static void RunLanguageAssertions(Application application, MainWindow chineseWindow,
+        AppViewModel chineseViewModel, SettingsStore chineseStore, string output)
+    {
+        Check(Localization.CurrentLanguage == "zh-Hans" && chineseWindow.Title == "闪传", "chinese-default-independent-of-os-language");
+        AssertUpdateDialog(application, chineseWindow, "闪传更新", "更新并重启", "稍后");
+        Click(chineseWindow, "SettingsNav");
+        var chinesePage = Find<SettingsPage>(chineseWindow, "SettingsPageRoot");
+        var choice = Find<ComboBox>(chinesePage, "SettingLanguage");
+        Check((string)choice.SelectedValue == "zh-Hans", "default-language-choice-is-simplified-chinese");
+        choice.SelectedValue = "en";
+        Pump();
+        Check(chineseWindow.TrySaveSettingsBeforeClose() && chineseStore.Load().Language == "en", "language-choice-saved-with-regular-settings");
+        Check(Localization.CurrentLanguage == "zh-Hans" && chineseWindow.Title == "闪传", "language-change-waits-for-restart");
+
+        var root = Path.Combine(output, "english-fixture");
+        Directory.CreateDirectory(root);
+        var store = new SettingsStore(root);
+        var credentials = new FakeCredentials();
+        var settings = new AppSettings { Language = "en", Host = "english.example.invalid", Username = "synthetic-user" };
+        store.Save(settings);
+        Localization.Configure(store.Load().Language);
+        LoadProductionStyles(application);
+        using var viewModel = new AppViewModel(settings, "synthetic-password", store, new HistoryStore(root),
+            new TransferLogStore(root), credentials, new FtpTransferService(), new FtpReceiveService(new ReceiveStateStore(root)), [], []);
+        viewModel.InitializeUpdates(root);
+        var englishWindow = new MainWindow(viewModel) { Width = 1080, Height = 800 };
+        try
+        {
+            englishWindow.Show();
+            Pump();
+            Check(englishWindow.Title == "Shanchuan" && Title(englishWindow) == "Clipboard history", "english-main-window-and-navigation-loaded");
+            Check(Find<Button>(englishWindow, "SettingsNav").Content as string == "Settings", "english-xaml-resource-lookup");
+            Check(Find<Button>(englishWindow, "CheckUpdates").Content as string == "Check for updates / Retry", "english-update-button");
+            AssertUpdateDialog(application, englishWindow, "Shanchuan update", "Update and restart", "Later");
+            Click(englishWindow, "SettingsNav");
+            var page = Find<SettingsPage>(englishWindow, "SettingsPageRoot");
+            Check((string)Find<ComboBox>(page, "SettingLanguage").SelectedValue == "en", "english-language-choice-restored-after-restart");
+            Check(Title(englishWindow) == "Settings" && viewModel.NetworkStatus == "Network location not configured", "english-settings-and-runtime-status");
+            Check(new HistoryRow(new HistoryEntry { Status = "等待发送" }, false).Status == "Queued", "english-history-status-with-stable-storage-code");
+            Check(new LocalizedValueConverter().Convert(TransferLogLevel.Warning, typeof(string), null!, System.Globalization.CultureInfo.CurrentCulture) as string == "Warning", "english-log-level-converter");
+            Capture(englishWindow, Path.Combine(output, "settings-page-english.png"));
+            Click(englishWindow, "OpenDirectoryRules");
+            var editor = application.Windows.OfType<DirectoryRulesWindow>().Single();
+            Check(editor.Title == "Directory exclusion rules", "english-rules-editor-title");
+            Check(Find<Button>(editor, "CompleteDirectoryRules").Content as string == "Done", "english-rules-editor-action");
+            Capture(editor, Path.Combine(output, "directory-rules-editor-english.png"));
+            Click(editor, "CompleteDirectoryRules");
+        }
+        finally
+        {
+            englishWindow.AllowClose = true;
+            englishWindow.Close();
+            Localization.Configure("zh-Hans");
+            LoadProductionStyles(application);
+        }
+    }
+
+    private static void AssertUpdateDialog(Application application, Window owner, string title, string update, string later)
+    {
+        Exception? failure = null;
+        owner.Dispatcher.BeginInvoke(new Action(() =>
+        {
+            Window? dialog = null;
+            try
+            {
+                dialog = application.Windows.OfType<Window>().Single(x => x.Title == title);
+                Check(Find<Button>(dialog, "ConfirmUpdateInstall").Content as string == update, "localized-update-dialog-affirmative-" + Localization.CurrentLanguage);
+                var postpone = Find<Button>(dialog, "DialogNo");
+                Check(postpone.Content as string == later && postpone.IsDefault, "localized-update-dialog-safe-default-" + Localization.CurrentLanguage);
+                postpone.RaiseEvent(new RoutedEventArgs(Button.ClickEvent, postpone));
+            }
+            catch (Exception error) { failure = error; dialog?.Close(); }
+        }), DispatcherPriority.ApplicationIdle);
+        var approved = LocalizedMessageBox.ConfirmUpdate(owner, "0.1.3 → 0.1.4", title);
+        if (failure is not null) throw failure;
+        Check(!approved, "localized-update-dialog-later-does-not-approve-" + Localization.CurrentLanguage);
     }
 
     private static void RunAssertions(Application application, MainWindow window, AppViewModel viewModel,

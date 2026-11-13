@@ -54,14 +54,14 @@ public partial class ProgressWindow : Window
 
         PhaseText.Text = progress.Phase switch
         {
-            TransferPhase.Preparing => "正在准备文件",
-            TransferPhase.Uploading => "正在上传",
-            TransferPhase.Publishing => "正在发布",
-            TransferPhase.Cancelling => "正在取消",
-            TransferPhase.Completed => "发送完成",
-            TransferPhase.Failed => "发送失败",
-            TransferPhase.Cancelled => "已取消",
-            _ => "闪传"
+            TransferPhase.Preparing => L.T("正在准备文件"),
+            TransferPhase.Uploading => L.T("正在上传"),
+            TransferPhase.Publishing => L.T("正在发布"),
+            TransferPhase.Cancelling => L.T("正在取消"),
+            TransferPhase.Completed => L.T("发送完成"),
+            TransferPhase.Failed => L.T("发送失败"),
+            TransferPhase.Cancelled => L.T("已取消"),
+            _ => L.T("闪传")
         };
         TitleText.Text = progress.Title;
         DetailText.Text = string.Join(" · ", new[] { progress.CurrentItem, progress.Detail }.Where(text => !string.IsNullOrWhiteSpace(text)));
@@ -69,7 +69,7 @@ public partial class ProgressWindow : Window
         UploadProgress.Value = (progress.Fraction ?? 0) * 100;
         PercentText.Text = progress.Fraction.HasValue ? $"{progress.Fraction.Value:P0}" : "";
         BytesText.Text = progress.TotalBytes > 0 ? $"{FormatBytes(progress.UploadedBytes)} / {FormatBytes(progress.TotalBytes)}" : "";
-        QueueText.Text = progress.QueuedCount > 0 ? $"后面还有 {progress.QueuedCount} 个等待任务" : "";
+        QueueText.Text = progress.QueuedCount > 0 ? L.F($"后面还有 {progress.QueuedCount} 个等待任务") : "";
         HideButton.IsEnabled = true;
 
         if (!_viewModel.Settings.ShowTransferProgress) { Hide(); return; }

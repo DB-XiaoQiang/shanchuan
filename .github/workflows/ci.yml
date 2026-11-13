@@ -39,6 +39,8 @@ jobs:
           SHANCHUAN_UNSIGNED_CI: '1'
           SHANCHUAN_BUILD_NUMBER: ${{ github.run_number }}
         run: ./scripts/package.sh
+      - name: 双语资源与 Sparkle 文案验证（不启动 GUI）
+        run: python3 scripts/verify-sparkle-localization.py --app dist/闪传.app
       - uses: actions/upload-artifact@v4
         with:
           name: Shanchuan-macos-arm64-unsigned

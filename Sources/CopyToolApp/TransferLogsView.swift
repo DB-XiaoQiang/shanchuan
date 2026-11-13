@@ -18,18 +18,18 @@ struct TransferLogsView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .firstTextBaseline) {
-                Text("传输日志").font(.title2)
+                Text(L10n.text("传输日志")).font(.title2)
                 if model.privacy {
-                    Label("隐私模式已开启", systemImage: "eye.slash")
+                    Label(L10n.text("隐私模式已开启"), systemImage: "eye.slash")
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
-                Text(search.isEmpty ? "\(model.transferLogs.count) 条日志" : "\(visibleLogs.count) / \(model.transferLogs.count) 条日志")
+                Text(search.isEmpty ? L10n.format("%@ 条日志", String(describing: model.transferLogs.count)) : L10n.format("%@ / %@ 条日志", String(describing: visibleLogs.count), String(describing: model.transferLogs.count)))
                     .font(.caption).foregroundStyle(.secondary)
             }
 
             VStack(alignment: .leading, spacing: 5) {
-                Text("日志保存在本机，重新打开应用后可继续查看。最新日志显示在最上方。")
+                Text(L10n.text("日志保存在本机，重新打开应用后可继续查看。最新日志显示在最上方。"))
                     .font(.caption).foregroundStyle(.secondary)
                 if !model.privacy {
                     Text(model.transferLogFile.path)
@@ -44,8 +44,8 @@ struct TransferLogsView: View {
                 HStack(alignment: .top, spacing: 8) {
                     Image(systemName: "exclamationmark.triangle.fill")
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("日志文件读写异常").fontWeight(.semibold)
-                        Text(model.privacy ? "日志无法正常读取或保存，关闭隐私模式后可查看详细原因。" : model.logPersistenceError)
+                        Text(L10n.text("日志文件读写异常")).fontWeight(.semibold)
+                        Text(model.privacy ? L10n.text("日志无法正常读取或保存，关闭隐私模式后可查看详细原因。") : model.logPersistenceError)
                             .textSelection(.enabled)
                     }
                     Spacer(minLength: 0)
@@ -55,13 +55,13 @@ struct TransferLogsView: View {
                 .background(Color.red.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
             }
 
-            TextField(model.privacy ? "搜索日志等级或日期…" : "搜索日志内容、等级或日期…", text: $search)
+            TextField(model.privacy ? L10n.text("搜索日志等级或日期…") : L10n.text("搜索日志内容、等级或日期…"), text: $search)
                 .textFieldStyle(.roundedBorder)
 
             if model.transferLogs.isEmpty {
-                emptyState(title: "尚无传输日志", detail: "使用自定义复制快捷键、添加文件或手动重新发送后，可在这里查看过程和结果。")
+                emptyState(title: L10n.text("尚无传输日志"), detail: L10n.text("使用自定义复制快捷键、添加文件或手动重新发送后，可在这里查看过程和结果。"))
             } else if visibleLogs.isEmpty {
-                emptyState(title: "没有匹配的日志", detail: "请尝试其他关键词，或清空搜索内容。")
+                emptyState(title: L10n.text("没有匹配的日志"), detail: L10n.text("请尝试其他关键词，或清空搜索内容。"))
             } else {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
@@ -77,9 +77,9 @@ struct TransferLogsView: View {
 
             Divider()
             VStack(alignment: .leading, spacing: 6) {
-                Button("发送文本、文件和文件夹验证样例") { model.sendValidationSamples() }
+                Button(L10n.text("发送文本、文件和文件夹验证样例")) { model.sendValidationSamples() }
                     .disabled(!model.activeTransfer.isEmpty || model.queued > 0)
-                Text("仅点击按钮时发送合成样例到配置的 FTP；接收结果须在内网端核对。")
+                Text(L10n.text("仅点击按钮时发送合成样例到配置的 FTP；接收结果须在内网端核对。"))
                     .font(.caption).foregroundStyle(.secondary)
             }
         }
@@ -115,7 +115,7 @@ private struct TransferLogRow: View {
                     .font(.caption).foregroundStyle(levelColor)
                 Spacer(minLength: 0)
             }
-            Text(privacy ? "日志详情已隐藏" : entry.message)
+            Text(privacy ? L10n.text("日志详情已隐藏") : entry.message)
                 .font(.system(.body, design: .monospaced))
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -126,17 +126,17 @@ private struct TransferLogRow: View {
 
     static func levelTitle(_ level: TransferLogEntry.Level) -> String {
         switch level {
-        case .info: return "信息"
-        case .success: return "成功"
-        case .warning: return "提醒"
-        case .error: return "失败"
-        case .cancelled: return "已取消"
+        case .info: return L10n.text("信息")
+        case .success: return L10n.text("成功")
+        case .warning: return L10n.text("提醒")
+        case .error: return L10n.text("失败")
+        case .cancelled: return L10n.text("已取消")
         }
     }
 
     static func dateText(_ date: Date) -> String {
         date.formatted(.dateTime.year().month(.twoDigits).day(.twoDigits)
-            .hour(.twoDigits(amPM: .omitted)).minute(.twoDigits).second(.twoDigits))
+            .hour(.twoDigits(amPM: .omitted)).minute(.twoDigits).second(.twoDigits).locale(L10n.language.locale))
     }
 
     private var levelColor: Color {

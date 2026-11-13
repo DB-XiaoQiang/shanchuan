@@ -3,6 +3,23 @@ import CopyToolCore
 @testable import CopyToolApp
 
 final class FailureNotificationTests: XCTestCase {
+    func testEnglishFailureClassificationRetainsNotificationsAfterLanguageSwitching() {
+        for (message, level) in [
+            ("Shortcut: Finder · Copy confirmation timed out; not sent", TransferLogEntry.Level.warning),
+            ("Custom copy not sent: the clipboard changed. Copy again.", .warning),
+            ("Sending failed: 550", .error),
+            ("Verification samples not sent: FTP password is missing", .error),
+            ("Could not save image: disk unavailable", .error)
+        ] {
+            var policy = SendFailureNoticePolicy()
+            XCTAssertNotNil(policy.notice(for: message, level: level), message)
+        }
+        var policy = SendFailureNoticePolicy()
+        XCTAssertNil(policy.notice(for: "FTP upload completed", level: .success))
+        XCTAssertNil(policy.notice(for: "Transfer cancelled", level: .cancelled))
+        XCTAssertNil(policy.notice(for: "Shortcut: Paste action not performed", level: .warning))
+    }
+
     func testShortcutFailuresAndCaptureFailuresNotify() {
         for message in ["快捷键：访达 · 等待快捷键释放期间检测到新的操作，未发送",
                         "快捷键：前台应用 · 复制操作未执行：请等待当前操作或录制结束，未发送",

@@ -42,7 +42,7 @@ public sealed class UpdateManifestVerifier(string publicKeyPem)
     public static UpdateManifestVerifier CreateDefault()
     {
         using var stream = typeof(UpdateManifestVerifier).Assembly.GetManifestResourceStream("UpdateSigningPublicKey.pem")
-            ?? throw new InvalidOperationException("此构建缺少更新验签公钥。");
+            ?? throw new InvalidOperationException(L.T("此构建缺少更新验签公钥。"));
         using var reader = new StreamReader(stream);
         return new UpdateManifestVerifier(reader.ReadToEnd());
     }
@@ -50,20 +50,20 @@ public sealed class UpdateManifestVerifier(string publicKeyPem)
     public UpdateManifest Verify(byte[] manifest, byte[] signature)
     {
         if (manifest.Length is 0 or > MaxManifestBytes || signature.Length is 0 or > 256)
-            throw new InvalidDataException("更新清单或签名大小无效。");
+            throw new InvalidDataException(L.T("更新清单或签名大小无效。"));
         using var key = ECDsa.Create();
         key.ImportFromPem(publicKeyPem);
         if (key.KeySize != 256 || key.ExportParameters(false).Curve.Oid.Value != "1.2.840.10045.3.1.7" ||
             !key.VerifyData(manifest, signature, HashAlgorithmName.SHA256, DSASignatureFormat.Rfc3279DerSequence))
-            throw new InvalidDataException("更新清单签名验证失败。");
+            throw new InvalidDataException(L.T("更新清单签名验证失败。"));
         using var document = JsonDocument.Parse(manifest, new JsonDocumentOptions { MaxDepth = 16 });
         RejectDuplicateProperties(document.RootElement);
         var result = JsonSerializer.Deserialize<UpdateManifest>(manifest, JsonOptions)
-            ?? throw new InvalidDataException("更新清单为空。");
+            ?? throw new InvalidDataException(L.T("更新清单为空。"));
         if (result.SchemaVersion != 1 || result.Product != "Shanchuan" || result.Channel != "stable" || !IsVersion(result.Version))
-            throw new InvalidDataException("更新协议、产品、发布通道或版本不匹配。");
+            throw new InvalidDataException(L.T("更新协议、产品、发布通道或版本不匹配。"));
         if (result.Assets is null || result.Assets.Count is 0 or > 32 || result.ReleaseNotes is null || result.ReleaseNotes.Length > 64 * 1024)
-            throw new InvalidDataException("更新清单附件或说明无效。");
+            throw new InvalidDataException(L.T("更新清单附件或说明无效。"));
         var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var asset in result.Assets)
         {
@@ -71,7 +71,7 @@ public sealed class UpdateManifestVerifier(string publicKeyPem)
                 !HashPattern.IsMatch(asset.Sha256 ?? "") ||
                 !((asset.Platform == "windows" && asset.Arch == "x64" && asset.Kind is "velopack-full" or "velopack-feed" or "setup" or "portable") ||
                   (asset.Platform == "macos" && asset.Arch == "arm64" && asset.Kind is "sparkle-zip" or "dmg" or "appcast")))
-                throw new InvalidDataException("更新附件名称、平台、大小或摘要无效。");
+                throw new InvalidDataException(L.T("更新附件名称、平台、大小或摘要无效。"));
         }
         return result;
     }
@@ -80,7 +80,7 @@ public sealed class UpdateManifestVerifier(string publicKeyPem)
     public static bool IsVersion(string? version) => version is not null && VersionPattern.IsMatch(version) && version.Split('.').All(part => int.TryParse(part, out var component) && component <= 999999);
     public static int CompareVersions(string left, string right)
     {
-        if (!IsVersion(left) || !IsVersion(right)) throw new InvalidDataException("更新版本号无效。");
+        if (!IsVersion(left) || !IsVersion(right)) throw new InvalidDataException(L.T("更新版本号无效。"));
         var a = left.Split('.').Select(int.Parse).ToArray();
         var b = right.Split('.').Select(int.Parse).ToArray();
         for (var i = 0; i < 3; i++) if (a[i] != b[i]) return a[i].CompareTo(b[i]);
@@ -91,11 +91,11 @@ public sealed class UpdateManifestVerifier(string publicKeyPem)
     {
         var info = new FileInfo(path);
         if (!info.Exists || info.LinkTarget is not null || info.Length != asset.Size)
-            throw new InvalidDataException($"更新附件大小或路径不正确：{asset.Name}");
+            throw new InvalidDataException(L.F($"更新附件大小或路径不正确：{asset.Name}"));
         await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 128 * 1024, true);
         var digest = Convert.ToHexString(await SHA256.HashDataAsync(stream, token)).ToLowerInvariant();
         if (!CryptographicOperations.FixedTimeEquals(Convert.FromHexString(digest), Convert.FromHexString(asset.Sha256)))
-            throw new InvalidDataException($"更新附件 SHA-256 校验失败：{asset.Name}");
+            throw new InvalidDataException(L.F($"更新附件 SHA-256 校验失败：{asset.Name}"));
     }
 
     private static void RejectDuplicateProperties(JsonElement element)
@@ -105,7 +105,7 @@ public sealed class UpdateManifestVerifier(string publicKeyPem)
             var keys = new HashSet<string>(StringComparer.Ordinal);
             foreach (var property in element.EnumerateObject())
             {
-                if (!keys.Add(property.Name)) throw new InvalidDataException("更新清单包含重复字段。");
+                if (!keys.Add(property.Name)) throw new InvalidDataException(L.T("更新清单包含重复字段。"));
                 RejectDuplicateProperties(property.Value);
             }
         }

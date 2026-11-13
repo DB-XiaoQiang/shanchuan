@@ -25,10 +25,10 @@ import CopyToolCore
             try channel.validateManifestVersion(version)
         } catch { report(error.localizedDescription); return false }
         guard let key = Bundle.main.object(forInfoDictionaryKey: "SUPublicEDKey") as? String, !key.isEmpty else {
-            report("此构建尚未配置 Sparkle 验签公钥，请手动安装正式 DMG。")
+            report(L10n.text("此构建尚未配置 Sparkle 验签公钥，请手动安装正式 DMG。"))
             return false
         }
-        if let controller, !controller.updater.canCheckForUpdates { report("更新安装流程正在进行。"); return false }
+        if let controller, !controller.updater.canCheckForUpdates { report(L10n.text("更新安装流程正在进行。")); return false }
         approvedVersion = version
         let updaterController = SPUStandardUpdaterController(startingUpdater: false, updaterDelegate: self, userDriverDelegate: nil)
         updaterController.updater.automaticallyChecksForUpdates = false
@@ -44,7 +44,7 @@ import CopyToolCore
         return channel.sparkleFeedURL(version: approvedVersion)
     }
     static func validateTarget(actual: String, approved: String?) throws {
-        guard let approved, actual == approved else { throw UpdateFailure.invalid("更新源返回的版本与已确认版本不一致。") }
+        guard let approved, actual == approved else { throw UpdateFailure.invalid(L10n.text("更新源返回的版本与已确认版本不一致。")) }
     }
     func updater(_ updater: SPUUpdater, shouldProceedWithUpdate updateItem: SUAppcastItem, updateCheck: SPUUpdateCheck) throws {
         try Self.validateTarget(actual: updateItem.displayVersionString, approved: approvedVersion)

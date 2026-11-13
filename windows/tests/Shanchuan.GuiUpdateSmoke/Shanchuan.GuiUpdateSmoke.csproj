@@ -12,5 +12,6 @@
   <ItemGroup>
     <ProjectReference Include="../../src/Shanchuan.Core/Shanchuan.Core.csproj" />
     <Compile Include="../../src/Shanchuan.Windows/Services/WindowsCredentialStore.cs" Link="WindowsCredentialStore.cs" />
+    <Compile Include="../../src/Shanchuan.Windows/GlobalUsings.cs" Link="GlobalUsings.cs" />
   </ItemGroup>
 </Project>

@@ -64,7 +64,7 @@ public sealed class FtpReceiveService(ReceiveStateStore stateStore)
                 {
                     state.ProcessedControls.RemoveAt(state.ProcessedControls.Count - 1);
                     state.PendingCleanup.Remove(controlName);
-                    warnings.Add($"“{item.Entry.Title}”已保存到本地，但接收状态保存失败，远端数据暂未删除：{error.Message}");
+                    warnings.Add(L.F($"“{item.Entry.Title}”已保存到本地，但接收状态保存失败，远端数据暂未删除：{error.Message}"));
                     continue;
                 }
 
@@ -73,7 +73,7 @@ public sealed class FtpReceiveService(ReceiveStateStore stateStore)
                 if (cleanupWarnings.Count == 0)
                 {
                     try { stateStore.Save(state); }
-                    catch (Exception error) { warnings.Add("远端已清理，但本机接收状态未能更新：" + error.Message); }
+                    catch (Exception error) { warnings.Add(L.T("远端已清理，但本机接收状态未能更新：") + error.Message); }
                 }
             }
             catch (OperationCanceledException) { throw; }
@@ -97,7 +97,7 @@ public sealed class FtpReceiveService(ReceiveStateStore stateStore)
             var controlFile = Path.Combine(staging, "control");
             await Download(client, controlFile, controlPath, cancellationToken).ConfigureAwait(false);
             if (new FileInfo(controlFile).Length > MaxControlBytes)
-                throw new InvalidDataException("控制文件超过 16 MiB，已停止处理。");
+                throw new InvalidDataException(L.T("控制文件超过 16 MiB，已停止处理。"));
             var content = await File.ReadAllTextAsync(controlFile, StrictUtf8, cancellationToken).ConfigureAwait(false);
             if (!content.StartsWith("file=", StringComparison.Ordinal))
                 return new ReceivedItem(new HistoryEntry
@@ -117,8 +117,8 @@ public sealed class FtpReceiveService(ReceiveStateStore stateStore)
                 await Download(client, payload, entity.RemotePath, cancellationToken).ConfigureAwait(false);
                 var actualHash = await Md5(payload, cancellationToken).ConfigureAwait(false);
                 if (!string.Equals(actualHash, entity.ExpectedMd5, StringComparison.OrdinalIgnoreCase))
-                    throw new InvalidDataException($"MD5 校验失败：{entity.LocalName}；预期 {entity.ExpectedMd5.ToLowerInvariant()}，" +
-                        $"实际 {actualHash}，下载 {new FileInfo(payload).Length} 字节。远端数据已保留，请检查是否有同名投递覆盖或传输不完整。");
+                    throw new InvalidDataException(L.F($"MD5 校验失败：{entity.LocalName}；预期 {entity.ExpectedMd5.ToLowerInvariant()}，") +
+                        L.F($"实际 {actualHash}，下载 {new FileInfo(payload).Length} 字节。远端数据已保留，请检查是否有同名投递覆盖或传输不完整。"));
                 if (entity.IsFolder)
                 {
                     var folder = Path.Combine(staging, "folder-" + index.ToString(CultureInfo.InvariantCulture));
@@ -146,12 +146,12 @@ public sealed class FtpReceiveService(ReceiveStateStore stateStore)
     private static List<RemoteEntity> ParseManifest(string content, AppSettings settings)
     {
         var firstBreak = content.IndexOfAny(['\r', '\n']);
-        if (firstBreak < 0) throw new InvalidDataException("文件控制清单缺少时间戳，远端数据已保留。");
+        if (firstBreak < 0) throw new InvalidDataException(L.T("文件控制清单缺少时间戳，远端数据已保留。"));
         var manifest = content[5..firstBreak];
         var timestamp = content[(firstBreak + 1)..].Trim();
         if (!long.TryParse(timestamp, NumberStyles.None, CultureInfo.InvariantCulture, out _))
-            throw new InvalidDataException("文件控制清单的时间戳无效，远端数据已保留。");
-        if (manifest.Length == 0) throw new InvalidDataException("文件控制清单为空，远端数据已保留。");
+            throw new InvalidDataException(L.T("文件控制清单的时间戳无效，远端数据已保留。"));
+        if (manifest.Length == 0) throw new InvalidDataException(L.T("文件控制清单为空，远端数据已保留。"));
 
         var entities = new List<RemoteEntity>();
         var remotePaths = new HashSet<string>(StringComparer.Ordinal);
@@ -159,10 +159,10 @@ public sealed class FtpReceiveService(ReceiveStateStore stateStore)
         {
             var parts = item.Split('|');
             if (parts.Length != 2 || parts[1].Length != 32 || !parts[1].All(Uri.IsHexDigit))
-                throw new InvalidDataException("文件控制清单包含无效的名称或 MD5，远端数据已保留。");
+                throw new InvalidDataException(L.T("文件控制清单包含无效的名称或 MD5，远端数据已保留。"));
             var isFolder = parts[0].StartsWith("folder:", StringComparison.Ordinal);
             var isMarked = parts[0].StartsWith("877D1C:", StringComparison.Ordinal);
-            if (isFolder && isMarked) throw new InvalidDataException("文件控制清单包含冲突的类型标记。");
+            if (isFolder && isMarked) throw new InvalidDataException(L.T("文件控制清单包含冲突的类型标记。"));
             var prefixLength = isFolder ? 7 : isMarked ? 7 : 0;
             var localName = parts[0][prefixLength..];
             Require(ProtocolValidation.ValidateName(localName));
@@ -179,7 +179,7 @@ public sealed class FtpReceiveService(ReceiveStateStore stateStore)
             }
             else remoteDirectory = settings.Directory.TrimEnd('/') + "/system_temp";
             var remotePath = remoteDirectory + "/" + remoteName;
-            if (!remotePaths.Add(remotePath)) throw new InvalidDataException("文件控制清单包含重复的远端实体。");
+            if (!remotePaths.Add(remotePath)) throw new InvalidDataException(L.T("文件控制清单包含重复的远端实体。"));
             entities.Add(new RemoteEntity(localName, remotePath, parts[1], isFolder));
         }
         return entities;
@@ -224,7 +224,7 @@ public sealed class FtpReceiveService(ReceiveStateStore stateStore)
             var candidate = Path.Combine(root, stem + suffix + extension);
             if (!File.Exists(candidate) && !Directory.Exists(candidate)) return candidate;
         }
-        throw new IOException($"接收目录中已有过多同名文件：{name}");
+        throw new IOException(L.F($"接收目录中已有过多同名文件：{name}"));
     }
 
     private static string? ValidateLocalName(string name)
@@ -236,7 +236,7 @@ public sealed class FtpReceiveService(ReceiveStateStore stateStore)
              stem.StartsWith("LPT", StringComparison.OrdinalIgnoreCase)) && stem[3] is >= '1' and <= '9');
         if (name.EndsWith(' ') || name.EndsWith('.') || name.Any(char.IsControl) ||
             name.IndexOfAny(['<', '>', ':', '"', '/', '\\', '|', '?', '*']) >= 0 || reservedDevice)
-            return $"文件名不能安全写入 Windows：{name}";
+            return L.F($"文件名不能安全写入 Windows：{name}");
         return null;
     }
 
@@ -264,7 +264,7 @@ public sealed class FtpReceiveService(ReceiveStateStore stateStore)
     {
         var result = await client.DownloadFile(localPath, remotePath, FtpLocalExists.Overwrite,
             FtpVerify.None, null, cancellationToken).ConfigureAwait(false);
-        if (result != FtpStatus.Success) throw new IOException($"FTP 下载未完成：{remotePath}（{result}）。");
+        if (result != FtpStatus.Success) throw new IOException(L.F($"FTP 下载未完成：{remotePath}（{result}）。"));
     }
 
     private static async Task<string> Md5(string path, CancellationToken cancellationToken)
@@ -290,7 +290,7 @@ public sealed class FtpReceiveService(ReceiveStateStore stateStore)
         if (warnings.Count == 0 && state.PendingCleanup.Count == 0)
         {
             try { stateStore.Save(state); }
-            catch (Exception error) { warnings.Add("接收清理状态保存失败：" + error.Message); }
+            catch (Exception error) { warnings.Add(L.T("接收清理状态保存失败：") + error.Message); }
         }
         return warnings;
     }
@@ -306,7 +306,7 @@ public sealed class FtpReceiveService(ReceiveStateStore stateStore)
             catch (FtpCommandException error) when (error.CompletionCode == "550") { }
             catch (Exception error) when (error is not OperationCanceledException)
             {
-                warnings.Add($"远端清理失败：{path}；{DescribeError(error)}");
+                warnings.Add(L.F($"远端清理失败：{path}；{DescribeError(error)}"));
             }
         }
         if (warnings.Count == 0) state.PendingCleanup.Remove(controlName);
@@ -315,9 +315,9 @@ public sealed class FtpReceiveService(ReceiveStateStore stateStore)
 
     public static string DescribeError(Exception error)
     {
-        var detail = string.IsNullOrWhiteSpace(error.Message) ? "未提供错误消息" : error.Message.Trim();
+        var detail = string.IsNullOrWhiteSpace(error.Message) ? L.T("未提供错误消息") : error.Message.Trim();
         if (error is FtpCommandException ftp && !string.IsNullOrWhiteSpace(ftp.CompletionCode))
-            detail += "；FTP 响应码 " + ftp.CompletionCode;
+            detail += L.T("；FTP 响应码 ") + ftp.CompletionCode;
         return error.GetType().Name + "：" + detail;
     }
 
@@ -341,7 +341,7 @@ public sealed class FtpReceiveService(ReceiveStateStore stateStore)
     private static void Validate(AppSettings settings, string password)
     {
         if (settings.ValidateForTransfer() is { } error) throw new InvalidDataException(error);
-        if (password.Any(char.IsControl)) throw new InvalidDataException("FTP 密码不能包含控制字符。");
+        if (password.Any(char.IsControl)) throw new InvalidDataException(L.T("FTP 密码不能包含控制字符。"));
     }
 
     private static void Require(string? error)
@@ -400,8 +400,8 @@ internal static class SafeZipExtractor
             var isDirectory = entry.FullName.EndsWith('/') || entry.FullName.EndsWith('\\');
             var relative = ValidateEntry(entry.FullName, isDirectory);
             var unixType = (entry.ExternalAttributes >> 16) & 0xF000;
-            if (unixType == 0xA000) throw new InvalidDataException("ZIP 包含符号链接，已拒绝解压。");
-            if (!paths.Add(relative)) throw new InvalidDataException("ZIP 包含重复路径，已拒绝解压。");
+            if (unixType == 0xA000) throw new InvalidDataException(L.T("ZIP 包含符号链接，已拒绝解压。"));
+            if (!paths.Add(relative)) throw new InvalidDataException(L.T("ZIP 包含重复路径，已拒绝解压。"));
             entries.Add((entry, relative, isDirectory));
         }
 
@@ -428,16 +428,16 @@ internal static class SafeZipExtractor
 
     private static string ValidateEntry(string name, bool isDirectory)
     {
-        if (string.IsNullOrWhiteSpace(name) || name.Contains('\0')) throw new InvalidDataException("ZIP 包含空路径。");
+        if (string.IsNullOrWhiteSpace(name) || name.Contains('\0')) throw new InvalidDataException(L.T("ZIP 包含空路径。"));
         var normalized = name.Replace('\\', '/');
-        if (normalized.StartsWith('/')) throw new InvalidDataException("ZIP 包含绝对路径，已拒绝解压。");
+        if (normalized.StartsWith('/')) throw new InvalidDataException(L.T("ZIP 包含绝对路径，已拒绝解压。"));
         var components = normalized.Split('/', StringSplitOptions.RemoveEmptyEntries);
-        if (components.Length == 0 && !isDirectory) throw new InvalidDataException("ZIP 包含无效文件路径。");
+        if (components.Length == 0 && !isDirectory) throw new InvalidDataException(L.T("ZIP 包含无效文件路径。"));
         foreach (var component in components)
         {
             if (component is "." or ".." || component.EndsWith(' ') || component.EndsWith('.') ||
                 component.Any(char.IsControl) || component.IndexOfAny(['<', '>', ':', '"', '|', '?', '*']) >= 0)
-                throw new InvalidDataException($"ZIP 包含不安全路径：{name}");
+                throw new InvalidDataException(L.F($"ZIP 包含不安全路径：{name}"));
         }
         return string.Join('/', components);
     }

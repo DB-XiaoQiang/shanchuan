@@ -17,9 +17,9 @@ public sealed partial class AppViewModel
 
     private static string IdleReceiveStatus(NetworkMode mode) => mode switch
     {
-        NetworkMode.Internal => "内网 · 等待检查外网投递",
-        NetworkMode.External => "外网 · 接收已禁用，禁止下载和删除",
-        _ => "未设置 · 发送和接收均已禁用"
+        NetworkMode.Internal => L.T("内网 · 等待检查外网投递"),
+        NetworkMode.External => L.T("外网 · 接收已禁用，禁止下载和删除"),
+        _ => L.T("未设置 · 发送和接收均已禁用")
     };
 
     private void StartReceiver()
@@ -77,11 +77,11 @@ public sealed partial class AppViewModel
             {
                 if (settings.ValidateForTransfer() is { } validationError)
                 {
-                    OnUi(() => ReceiveStatus = "内网 · 配置不完整：" + validationError);
+                    OnUi(() => ReceiveStatus = L.T("内网 · 配置不完整：") + validationError);
                 }
                 else
                 {
-                    OnUi(() => ReceiveStatus = "内网 · 正在检查外网投递…");
+                    OnUi(() => ReceiveStatus = L.T("内网 · 正在检查外网投递…"));
                     await _updateTransferGate.WaitAsync(current.Token).ConfigureAwait(false);
                     ReceiveBatchResult result;
                     try
@@ -102,9 +102,9 @@ public sealed partial class AppViewModel
                 var reason = Sanitize(error.Message);
                 OnUi(() =>
                 {
-                    ReceiveStatus = "内网 · 检查失败：" + reason;
-                    StatusMessage = "接收检查失败：" + reason;
-                    AddLog(TransferLogLevel.Error, "接收检查失败：" + reason);
+                    ReceiveStatus = L.T("内网 · 检查失败：") + reason;
+                    StatusMessage = L.T("接收检查失败：") + reason;
+                    AddLog(TransferLogLevel.Error, L.T("接收检查失败：") + reason);
                 });
             }
             finally
@@ -131,12 +131,12 @@ public sealed partial class AppViewModel
         foreach (var entry in result.Received)
         {
             _history.Insert(0, entry);
-            AddLog(TransferLogLevel.Success, "接收成功：" + entry.Title);
+            AddLog(TransferLogLevel.Success, L.T("接收成功：") + entry.Title);
             try { ClipboardRestoreRequested?.Invoke(this, entry); }
             catch (Exception error)
             {
                 clipboardFailed = true;
-                AddLog(TransferLogLevel.Warning, "已接收并保存，但写入 Windows 剪贴板失败：" +
+                AddLog(TransferLogLevel.Warning, L.T("已接收并保存，但写入 Windows 剪贴板失败：") +
                     entry.Title + "；" + Sanitize(error.Message));
             }
         }
@@ -145,21 +145,21 @@ public sealed partial class AppViewModel
             RefreshHistory();
             SaveHistoryAndMedia();
             StatusMessage = clipboardFailed
-                ? $"已接收 {result.Received.Count} 项，但部分剪贴板写入失败；请查看传输日志。"
-                : $"已接收 {result.Received.Count} 项，内容已写入剪贴板。";
+                ? L.F($"已接收 {result.Received.Count} 项，但部分剪贴板写入失败；请查看传输日志。")
+                : L.F($"已接收 {result.Received.Count} 项，内容已写入剪贴板。");
         }
 
         foreach (var failure in result.Failures)
-            AddLog(TransferLogLevel.Error, $"接收失败：{failure.ControlName}；{Sanitize(failure.Reason)}；远端数据已保留。");
+            AddLog(TransferLogLevel.Error, L.F($"接收失败：{failure.ControlName}；{Sanitize(failure.Reason)}；远端数据已保留。"));
         foreach (var warning in result.Warnings)
             AddLog(TransferLogLevel.Warning, Sanitize(warning));
 
-        var detail = result.Received.Count > 0 ? $"接收 {result.Received.Count} 项" :
-            result.DiscoveredCount > 0 ? "未发现新的待接收内容" : "暂无外网投递";
-        if (result.Failures.Count > 0) detail += $"，失败 {result.Failures.Count} 项";
-        if (result.Warnings.Count > 0) detail += $"，清理警告 {result.Warnings.Count} 条";
-        ReceiveStatus = $"内网 · 最近检查 {DateTime.Now:HH:mm:ss} · {detail}";
+        var detail = result.Received.Count > 0 ? L.F($"接收 {result.Received.Count} 项") :
+            result.DiscoveredCount > 0 ? L.T("未发现新的待接收内容") : L.T("暂无外网投递");
+        if (result.Failures.Count > 0) detail += L.F($"，失败 {result.Failures.Count} 项");
+        if (result.Warnings.Count > 0) detail += L.F($"，清理警告 {result.Warnings.Count} 条");
+        ReceiveStatus = L.F($"内网 · 最近检查 {DateTime.Now:HH:mm:ss} · {detail}");
         if (result.Failures.Count > 0 && result.Received.Count == 0)
-            StatusMessage = "接收失败，远端数据已保留；请查看传输日志。";
+            StatusMessage = L.T("接收失败，远端数据已保留；请查看传输日志。");
     }
 }

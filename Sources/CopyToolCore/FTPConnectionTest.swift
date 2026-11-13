@@ -14,13 +14,13 @@ public enum FTPConnectionTestError: Error, LocalizedError, Equatable {
     public var errorDescription: String? {
         switch self {
         case .invalidSettings(let reason): return reason
-        case .authenticationFailed: return "FTP 登录失败，请检查用户名和密码。"
-        case .unavailable: return "无法连接 FTP 服务，请检查主机、端口和网络。"
-        case .timedOut: return "FTP 连接超时，请检查服务状态和网络。"
-        case .directoryUnavailable: return "FTP 已连接，但无法进入目标目录，请检查目录路径和访问权限。"
-        case .cancelled: return "FTP 连接测试已取消。"
-        case .alreadyRunning: return "FTP 连接测试正在进行。"
-        case .failed(let code): return "FTP 连接测试失败（\(code)），请检查服务状态和配置。"
+        case .authenticationFailed: return L10n.text("FTP 登录失败，请检查用户名和密码。")
+        case .unavailable: return L10n.text("无法连接 FTP 服务，请检查主机、端口和网络。")
+        case .timedOut: return L10n.text("FTP 连接超时，请检查服务状态和网络。")
+        case .directoryUnavailable: return L10n.text("FTP 已连接，但无法进入目标目录，请检查目录路径和访问权限。")
+        case .cancelled: return L10n.text("FTP 连接测试已取消。")
+        case .alreadyRunning: return L10n.text("FTP 连接测试正在进行。")
+        case .failed(let code): return L10n.format("FTP 连接测试失败（%@），请检查服务状态和配置。", String(describing: code))
         }
     }
 }
@@ -100,21 +100,21 @@ public final class FTPConnectionTest: @unchecked Sendable {
             value.unicodeScalars.contains { CharacterSet.controlCharacters.contains($0) }
         }
         guard !hasControl(settings.host) else {
-            throw FTPConnectionTestError.invalidSettings("FTP 主机不能包含控制字符。")
+            throw FTPConnectionTestError.invalidSettings(L10n.text("FTP 主机不能包含控制字符。"))
         }
         let host = settings.host.trimmingCharacters(in: .whitespaces)
         guard validHost(host), (1...65535).contains(settings.port) else {
-            throw FTPConnectionTestError.invalidSettings("请填写有效的 FTP 主机和端口；主机不需要 ftp:// 前缀。")
+            throw FTPConnectionTestError.invalidSettings(L10n.text("请填写有效的 FTP 主机和端口；主机不需要 ftp:// 前缀。"))
         }
         guard !settings.username.isEmpty else {
-            throw FTPConnectionTestError.invalidSettings("请填写 FTP 用户名。")
+            throw FTPConnectionTestError.invalidSettings(L10n.text("请填写 FTP 用户名。"))
         }
         guard !settings.username.contains(":"), !hasControl(settings.username), !hasControl(settings.password) else {
-            throw FTPConnectionTestError.invalidSettings("FTP 用户名不能包含冒号，凭据不能包含控制字符。")
+            throw FTPConnectionTestError.invalidSettings(L10n.text("FTP 用户名不能包含冒号，凭据不能包含控制字符。"))
         }
         let segments = settings.directory.split(separator: "/").map(String.init)
         guard !hasControl(settings.directory), !settings.directory.contains("\\"), !segments.contains("..") else {
-            throw FTPConnectionTestError.invalidSettings("FTP 目录不能包含控制字符、反斜杠或上级目录路径。")
+            throw FTPConnectionTestError.invalidSettings(L10n.text("FTP 目录不能包含控制字符、反斜杠或上级目录路径。"))
         }
         var components = URLComponents()
         components.scheme = "ftp"
@@ -122,13 +122,13 @@ public final class FTPConnectionTest: @unchecked Sendable {
         components.port = settings.port
         components.path = "/"
         guard let url = components.url?.absoluteString else {
-            throw FTPConnectionTestError.invalidSettings("FTP 地址无效。")
+            throw FTPConnectionTestError.invalidSettings(L10n.text("FTP 地址无效。"))
         }
         let directory = "/" + segments.joined(separator: "/")
         // HEAD on a directory URL needs no data channel. CWD is checked explicitly and curl aborts on failure.
         let config = "user = \(quote(settings.username + ":" + settings.password))\nurl = \(quote(url))\nquote = \(quote("CWD " + directory))\n"
         guard config.utf8.count <= 16_384 else {
-            throw FTPConnectionTestError.invalidSettings("FTP 配置内容过长，请检查凭据和目录。")
+            throw FTPConnectionTestError.invalidSettings(L10n.text("FTP 配置内容过长，请检查凭据和目录。"))
         }
         return config
     }

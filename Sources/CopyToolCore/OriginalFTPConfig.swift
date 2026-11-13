@@ -23,13 +23,13 @@ public enum OriginalFTPConfig {
 
         public var errorDescription: String? {
             switch self {
-            case .unreadableFile: return "无法读取所选原应用配置文件。"
-            case .invalidEncoding: return "原应用配置必须是有效 UTF-8 文本。"
-            case .oversizedConfiguration: return "原应用配置文件过大，已停止导入。"
-            case .unsupportedSyntax(let line): return "原应用配置第 \(line) 行包含不支持的 TOML 语法。"
-            case .duplicateKey(let line): return "原应用配置第 \(line) 行包含重复字段。"
-            case .missingField(let field): return "原应用配置缺少 FTP 字段：\(field)。"
-            case .invalidField(let field): return "原应用 FTP 字段无效：\(field)。"
+            case .unreadableFile: return L10n.text("无法读取所选原应用配置文件。")
+            case .invalidEncoding: return L10n.text("原应用配置必须是有效 UTF-8 文本。")
+            case .oversizedConfiguration: return L10n.text("原应用配置文件过大，已停止导入。")
+            case .unsupportedSyntax(let line): return L10n.format("原应用配置第 %@ 行包含不支持的 TOML 语法。", String(describing: line))
+            case .duplicateKey(let line): return L10n.format("原应用配置第 %@ 行包含重复字段。", String(describing: line))
+            case .missingField(let field): return L10n.format("原应用配置缺少 FTP 字段：%@。", String(describing: field))
+            case .invalidField(let field): return L10n.format("原应用 FTP 字段无效：%@。", String(describing: field))
             }
         }
     }

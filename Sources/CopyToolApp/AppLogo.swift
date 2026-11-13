@@ -1,3 +1,4 @@
+import CopyToolCore
 import AppKit
 import SwiftUI
 
@@ -16,6 +17,6 @@ struct AppLogo: View {
             }
         }
         .frame(width: size, height: size)
-        .accessibilityLabel("闪传 Logo")
+        .accessibilityLabel(L10n.text("闪传 Logo"))
     }
 }

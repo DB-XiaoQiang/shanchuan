@@ -52,20 +52,20 @@ public static class TransferPreparationService
 
         if (entry.Kind != HistoryKind.Text)
         {
-            if (entry.Paths.Count == 0) throw new InvalidDataException("没有可发送的文件。");
+            if (entry.Paths.Count == 0) throw new InvalidDataException(L.T("没有可发送的文件。"));
             foreach (var sourcePath in entry.Paths)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 var path = Path.GetFullPath(sourcePath);
                 var isDirectory = Directory.Exists(path);
-                if (!isDirectory && !File.Exists(path)) throw new FileNotFoundException("要发送的文件或文件夹不存在。", path);
+                if (!isDirectory && !File.Exists(path)) throw new FileNotFoundException(L.T("要发送的文件或文件夹不存在。"), path);
                 if ((File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0)
-                    throw new InvalidDataException("不支持直接发送符号链接或联接点，请选择实际文件或文件夹。");
+                    throw new InvalidDataException(L.T("不支持直接发送符号链接或联接点，请选择实际文件或文件夹。"));
 
                 var name = isDirectory ? new DirectoryInfo(path).Name : Path.GetFileName(path);
                 Require(ProtocolValidation.ValidateName(name));
                 if (name.StartsWith("folder:", StringComparison.Ordinal) || name.StartsWith("877D1C:", StringComparison.Ordinal))
-                    throw new InvalidDataException($"协议不能安全表示文件名：{name}");
+                    throw new InvalidDataException(L.F($"协议不能安全表示文件名：{name}"));
 
                 var isOffice = !isDirectory && OfficeExtensions.Contains(Path.GetExtension(name).TrimStart('.'));
                 var marked = isOffice && preferences.AutoDecrypt && HasMarker(path);
@@ -83,7 +83,7 @@ public static class TransferPreparationService
 
                 var key = directory + "/" + remoteName;
                 if (!entities.Add(key) || key == systemDirectory + "/" + controlName)
-                    throw new InvalidDataException($"多个文件映射为同一远端实体：{remoteName}");
+                    throw new InvalidDataException(L.F($"多个文件映射为同一远端实体：{remoteName}"));
                 specs.Add(new FileSpec(path, name, directory, isDirectory, marked));
             }
         }
@@ -233,7 +233,7 @@ internal static class DirectoryArchiver
             var relative = prefix + name;
             var attributes = File.GetAttributes(child);
             if ((attributes & FileAttributes.ReparsePoint) != 0)
-                throw new InvalidDataException($"目录中包含符号链接或联接点，已停止打包：{relative}");
+                throw new InvalidDataException(L.F($"目录中包含符号链接或联接点，已停止打包：{relative}"));
             var isDirectory = (attributes & FileAttributes.Directory) != 0;
             if (rules.Excludes(relative, isDirectory)) { excluded++; continue; }
             var output = Path.Combine(destination, name);

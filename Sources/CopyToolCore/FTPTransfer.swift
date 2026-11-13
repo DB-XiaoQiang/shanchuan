@@ -25,9 +25,9 @@ public enum FTPTransferError: Error, LocalizedError {
     public var errorDescription: String? {
         switch self {
         case .invalidSettings(let reason): return reason
-        case .invalidFile: return "上传源必须是可读取的普通文件。"
-        case .cancelled: return "上传已取消。"
-        case .failed(let status, let detail): return "传输失败（\(status)）：\(detail)"
+        case .invalidFile: return L10n.text("上传源必须是可读取的普通文件。")
+        case .cancelled: return L10n.text("上传已取消。")
+        case .failed(let status, let detail): return L10n.format("传输失败（%@）：%@", String(describing: status), String(describing: detail))
         }
     }
 }
@@ -64,17 +64,17 @@ public final class FTPTransfer: @unchecked Sendable {
         guard values.isRegularFile == true, values.isReadable == true else { throw FTPTransferError.invalidFile }
         let host = settings.host.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !host.isEmpty, !host.contains(where: { "/@?#\\\r\n\t ".contains($0) }), (1...65535).contains(settings.port) else {
-            throw FTPTransferError.invalidSettings("请填写有效的 FTP 主机和端口。")
+            throw FTPTransferError.invalidSettings(L10n.text("请填写有效的 FTP 主机和端口。"))
         }
         guard !settings.username.contains(":"), !settings.username.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }), !settings.password.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) else {
-            throw FTPTransferError.invalidSettings("FTP 用户名不能包含冒号，凭据不能包含控制字符。")
+            throw FTPTransferError.invalidSettings(L10n.text("FTP 用户名不能包含冒号，凭据不能包含控制字符。"))
         }
         guard !remoteName.isEmpty, remoteName != ".", remoteName != "..", !remoteName.contains("/"), !remoteName.contains("\\"), !remoteName.contains("\0") else {
-            throw FTPTransferError.invalidSettings("远端文件名必须是单个有效文件名。")
+            throw FTPTransferError.invalidSettings(L10n.text("远端文件名必须是单个有效文件名。"))
         }
         let segments = settings.directory.split(separator: "/").map(String.init)
         guard !segments.contains(".."), !settings.directory.contains("\0") else {
-            throw FTPTransferError.invalidSettings("远端目录不能包含上级目录路径。")
+            throw FTPTransferError.invalidSettings(L10n.text("远端目录不能包含上级目录路径。"))
         }
         var components = URLComponents()
         components.scheme = "ftp"
@@ -83,7 +83,7 @@ public final class FTPTransfer: @unchecked Sendable {
         // Double slash gives FTP an absolute path instead of a login-relative path.
         let allowed = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._~")
         components.percentEncodedPath = "//" + (segments + [remoteName]).map { $0.addingPercentEncoding(withAllowedCharacters: allowed)! }.joined(separator: "/")
-        guard let target = components.url?.absoluteString else { throw FTPTransferError.invalidSettings("FTP 地址无效。") }
+        guard let target = components.url?.absoluteString else { throw FTPTransferError.invalidSettings(L10n.text("FTP 地址无效。")) }
         let config = "user = \(Self.quote(settings.username + ":" + settings.password))\nurl = \(Self.quote(target))\n"
         progress(0)
         try run(executable: "/usr/bin/curl", arguments: ["--disable", "--config", "-", "--noproxy", "*", "--proto", "=ftp", "--ftp-create-dirs", "--connect-timeout", "15", "--speed-time", "60", "--speed-limit", "1", "--fail", "--show-error", "--progress-bar", "--upload-file", file.path], stdin: Data(config.utf8), progress: progress, secrets: [settings.password, settings.username + ":" + settings.password])
@@ -118,7 +118,7 @@ public final class FTPTransfer: @unchecked Sendable {
             let sourcePrefix = sourcePath.hasSuffix("/") ? sourcePath : sourcePath + "/"
             guard !root.resolvingSymlinksInPath().standardizedFileURL.path.hasPrefix(sourcePrefix),
                   !destination.resolvingSymlinksInPath().standardizedFileURL.path.hasPrefix(sourcePrefix) else {
-                throw FTPTransferError.invalidSettings("无法在所选目录外创建临时副本，请选择更具体的目录。")
+                throw FTPTransferError.invalidSettings(L10n.text("无法在所选目录外创建临时副本，请选择更具体的目录。"))
             }
             try fm.createDirectory(at: root, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
             snapshot = root
@@ -146,7 +146,7 @@ public final class FTPTransfer: @unchecked Sendable {
         let handle = try FileHandle(forUpdating: url)
         defer { try? handle.close() }
         let size = try handle.seekToEnd()
-        func invalid() -> FTPTransferError { .failed(-1, "ZIP 目录结构或 UTF-8 文件名无效。") }
+        func invalid() -> FTPTransferError { .failed(-1, L10n.text("ZIP 目录结构或 UTF-8 文件名无效。")) }
         func read(_ offset: UInt64, _ count: Int) throws -> Data {
             guard offset <= size, UInt64(count) <= size - offset else { throw invalid() }
             if count == 0 { return Data() }

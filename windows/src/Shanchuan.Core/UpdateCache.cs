@@ -47,7 +47,7 @@ public sealed class UpdateCache(string root, UpdateManifestVerifier verifier)
         var relative = Path.GetRelativePath(Root, path);
         if (relative.StartsWith("..", StringComparison.Ordinal) || Path.IsPathRooted(relative) ||
             !Directory.Exists(path) || new DirectoryInfo(path).LinkTarget is not null)
-            throw new InvalidDataException("更新缓存目录无效。");
+            throw new InvalidDataException(L.T("更新缓存目录无效。"));
         var bytes = await ReadLimitedAsync(Path.Combine(path, UpdateManifestVerifier.ManifestName), UpdateManifestVerifier.MaxManifestBytes, token);
         var signature = await ReadLimitedAsync(Path.Combine(path, UpdateManifestVerifier.SignatureName), 256, token);
         var manifest = verifier.Verify(bytes, signature);
@@ -63,7 +63,7 @@ public sealed class UpdateCache(string root, UpdateManifestVerifier verifier)
         if (manifest.WindowsUpdateAssets.Count != 2 || manifest.WindowsUpdateAssets.Count(x => x.Kind == "velopack-full") != 1 ||
             manifest.WindowsUpdateAssets.Count(x => x.Kind == "velopack-feed") != 1 ||
             manifest.WindowsUpdateAssets.Single(x => x.Kind == "velopack-feed").Name != "releases.win-x64.json")
-            throw new InvalidDataException("更新清单缺少唯一的 Windows 完整包和更新索引。");
+            throw new InvalidDataException(L.T("更新清单缺少唯一的 Windows 完整包和更新索引。"));
     }
 
     public static void ValidateWindowsFeed(string directory, UpdateManifest manifest)
@@ -72,20 +72,20 @@ public sealed class UpdateCache(string root, UpdateManifestVerifier verifier)
         var feed = manifest.WindowsUpdateAssets.Single(x => x.Kind == "velopack-feed");
         using var document = JsonDocument.Parse(File.ReadAllBytes(Path.Combine(directory, feed.Name)));
         if (!document.RootElement.TryGetProperty("Assets", out var assets) || assets.ValueKind != JsonValueKind.Array || assets.GetArrayLength() != 1)
-            throw new InvalidDataException("Windows 更新索引必须仅引用本版已签名完整包。");
+            throw new InvalidDataException(L.T("Windows 更新索引必须仅引用本版已签名完整包。"));
         var entry = assets[0];
         if (entry.GetProperty("FileName").GetString() != full.Name || entry.GetProperty("Version").GetString() != manifest.Version ||
             entry.GetProperty("Type").GetString() != "Full" || entry.GetProperty("PackageId").GetString() != "Shanchuan" ||
             entry.GetProperty("Size").GetInt64() != full.Size ||
             !string.Equals(entry.GetProperty("SHA256").GetString(), full.Sha256, StringComparison.OrdinalIgnoreCase))
-            throw new InvalidDataException("Windows 更新索引与已签名发行清单不一致。");
+            throw new InvalidDataException(L.T("Windows 更新索引与已签名发行清单不一致。"));
     }
 
     internal static async Task<byte[]> ReadLimitedAsync(string path, int maximum, CancellationToken token)
     {
         var info = new FileInfo(path);
         if (!info.Exists || info.LinkTarget is not null || info.Length is <= 0 || info.Length > maximum)
-            throw new InvalidDataException("更新元数据大小或路径无效。");
+            throw new InvalidDataException(L.T("更新元数据大小或路径无效。"));
         return await File.ReadAllBytesAsync(path, token);
     }
 }

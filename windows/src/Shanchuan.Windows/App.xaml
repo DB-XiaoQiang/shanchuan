@@ -1,8 +1,10 @@
 <Application x:Class="Shanchuan.Windows.App"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:loc="clr-namespace:Shanchuan.Windows"
              ShutdownMode="OnExplicitShutdown">
     <Application.Resources>
+        <loc:LocalizedValueConverter x:Key="LocalizedValue" />
         <SolidColorBrush x:Key="AccentBrush" Color="#2563EB" />
         <SolidColorBrush x:Key="TextBrush" Color="#172033" />
         <SolidColorBrush x:Key="MutedBrush" Color="#667085" />

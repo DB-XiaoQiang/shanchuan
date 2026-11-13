@@ -7,10 +7,10 @@ import CopyToolCore
         case ready, pending, saved, failed(String)
         var text: String {
             switch self {
-            case .ready: return "修改后自动保存"
-            case .pending: return "保存中…"
-            case .saved: return "已自动保存"
-            case .failed(let error): return "未保存：" + error
+            case .ready: return L10n.text("修改后自动保存")
+            case .pending: return L10n.text("保存中…")
+            case .saved: return L10n.text("已自动保存")
+            case .failed(let error): return L10n.text("未保存：") + error
             }
         }
     }
@@ -86,7 +86,7 @@ import CopyToolCore
     }
 
     private var validationError: String? {
-        guard let port = Int(portText), (1...65535).contains(port) else { return "端口须为 1–65535" }
+        guard let port = Int(portText), (1...65535).contains(port) else { return L10n.text("端口须为 1–65535") }
         var values = draft; values.port = port
         if let latest = current?() { values.shortcuts = latest.0.shortcuts }
         return values.validationError

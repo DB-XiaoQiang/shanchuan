@@ -26,10 +26,10 @@ public struct ShortcutBinding: Codable, Equatable, Sendable {
     }
 
     fileprivate var validationError: String? {
-        if !ShortcutKeyCatalog.allowedKeyCodes.contains(keyCode) { return "请选择支持的快捷键按键" }
-        if modifiers & ~Self.supportedModifiers != 0 { return "快捷键包含不支持的修饰键" }
+        if !ShortcutKeyCatalog.allowedKeyCodes.contains(keyCode) { return L10n.text("请选择支持的快捷键按键") }
+        if modifiers & ~Self.supportedModifiers != 0 { return L10n.text("快捷键包含不支持的修饰键") }
         if modifiers & (Self.commandModifier | Self.optionModifier | Self.controlModifier) == 0 {
-            return "快捷键至少需要 Command、Option 或 Control 中的一个修饰键"
+            return L10n.text("快捷键至少需要 Command、Option 或 Control 中的一个修饰键")
         }
 
         let command = modifiers & Self.commandModifier != 0
@@ -38,16 +38,16 @@ public struct ShortcutBinding: Codable, Equatable, Sendable {
         let shift = modifiers & Self.shiftModifier != 0
         // 保留应用原有的复制、粘贴，以及 macOS 的窗口、切换、锁屏和截图操作。
         if command && !option && !control && [UInt32(8), 9].contains(keyCode) {
-            return "请避开系统复制、粘贴快捷键 Command+C / Command+V"
+            return L10n.text("请避开系统复制、粘贴快捷键 Command+C / Command+V")
         }
         if command && [UInt32(12), 13, 4, 46, 48, 49].contains(keyCode) {
-            return "该组合用于系统或窗口操作，请选择其他快捷键"
+            return L10n.text("该组合用于系统或窗口操作，请选择其他快捷键")
         }
         if command && option && keyCode == 53 {
-            return "该组合用于系统强制退出，请选择其他快捷键"
+            return L10n.text("该组合用于系统强制退出，请选择其他快捷键")
         }
         if command && shift && [UInt32(20), 21, 23].contains(keyCode) {
-            return "该组合用于系统截图，请选择其他快捷键"
+            return L10n.text("该组合用于系统截图，请选择其他快捷键")
         }
         return nil
     }
@@ -72,10 +72,10 @@ public enum ShortcutKeyCatalog {
             (23, "5"), (22, "6"), (26, "7"), (28, "8"), (25, "9"),
             (27, "-"), (24, "="), (33, "["), (30, "]"), (42, "\\"),
             (41, ";"), (39, "'"), (43, ","), (47, "."), (44, "/"), (50, "`"),
-            (49, "空格"), (48, "Tab"), (36, "Return"), (51, "Delete"), (53, "Escape"),
+            (49, L10n.text("空格")), (48, "Tab"), (36, "Return"), (51, "Delete"), (53, "Escape"),
             (123, "←"), (124, "→"), (125, "↓"), (126, "↑"),
             (115, "Home"), (119, "End"), (116, "Page Up"), (121, "Page Down"),
-            (117, "向前删除"),
+            (117, L10n.text("向前删除")),
             (122, "F1"), (120, "F2"), (99, "F3"), (118, "F4"), (96, "F5"),
             (97, "F6"), (98, "F7"), (100, "F8"), (101, "F9"), (109, "F10"),
             (103, "F11"), (111, "F12")
@@ -86,7 +86,7 @@ public enum ShortcutKeyCatalog {
     public static let allowedKeyCodes = Set(keys.map(\.keyCode))
 
     public static func displayName(for keyCode: UInt32) -> String {
-        keys.first { $0.keyCode == keyCode }?.displayName ?? "未知按键（\(keyCode)）"
+        keys.first { $0.keyCode == keyCode }?.displayName ?? L10n.format("未知按键（%@）", String(describing: keyCode))
     }
 }
 
@@ -114,9 +114,9 @@ public struct CopyPasteShortcuts: Codable, Equatable, Sendable {
 
     public var validationError: String? {
         guard enabled else { return nil }
-        if let error = copy.validationError { return "复制快捷键：" + error }
-        if let error = paste.validationError { return "粘贴快捷键：" + error }
-        if copy == paste { return "复制和粘贴快捷键不能相同" }
+        if let error = copy.validationError { return L10n.text("复制快捷键：") + error }
+        if let error = paste.validationError { return L10n.text("粘贴快捷键：") + error }
+        if copy == paste { return L10n.text("复制和粘贴快捷键不能相同") }
         return nil
     }
 }

@@ -85,6 +85,7 @@ with Server(('127.0.0.1', 0), FTP) as server, tempfile.TemporaryDirectory() as t
     root = pathlib.Path(__file__).resolve().parents[2]
     executable = pathlib.Path(temporary) / 'ftp-connection-test'
     subprocess.run(['swiftc', '-swift-version', '6',
+                    str(root / 'Sources/CopyToolCore/Localization.swift'),
                     str(root / 'Sources/CopyToolCore/FTPTransfer.swift'),
                     str(root / 'Sources/CopyToolCore/DirectoryExclusions.swift'),
                     str(root / 'Sources/CopyToolCore/FTPConnectionTest.swift'),

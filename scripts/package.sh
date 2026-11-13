@@ -104,6 +104,7 @@ if [[ ! -d "$FRAMEWORK" ]]; then
 fi
 [[ -d "$FRAMEWORK" ]] || { print -u2 '缺少 Sparkle.framework'; exit 1; }
 /usr/bin/ditto "$FRAMEWORK" "$APP/Contents/Frameworks/Sparkle.framework"
+python3 scripts/stage-localizations.py "$APP" "$BIN_DIR/CopyTool_CopyToolCore.bundle"
 if [[ -n "${SHANCHUAN_UPDATE_FEED:-}" || -n "${SPARKLE_PUBLIC_KEY:-}" ]]; then
     [[ -n "${SHANCHUAN_UPDATE_FEED:-}" && -n "${SPARKLE_PUBLIC_KEY:-}" && "$SHANCHUAN_UPDATE_FEED" == https://* ]] || {
         print -u2 '自动更新需同时提供 HTTPS 更新源和 Sparkle 公钥。'; exit 1

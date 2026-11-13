@@ -1,7 +1,16 @@
+import CopyToolCore
 import SwiftUI
 import AppKit
 
-@main struct CopyToolApp: App {
+/// 在 SwiftUI/AppKit 创建窗口及读取框架翻译之前确定应用语言。
+@main enum CopyToolLauncher {
+    @MainActor static func main() {
+        L10n.configureProcessLanguage()
+        CopyToolApp.main()
+    }
+}
+
+struct CopyToolApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var delegate
     private let runtimeProfile: AppRuntimeProfile
     @StateObject private var model: AppModel
@@ -19,7 +28,9 @@ import AppKit
     }
     var body: some Scene {
         Window(runtimeProfile.applicationName, id: "main") {
-            RootView(model: model, updates: updates, navigation: navigation, settings: settings).frame(minWidth: 820, minHeight: 560)
+            RootView(model: model, updates: updates, navigation: navigation, settings: settings)
+                .environment(\.locale, L10n.language.locale)
+                .frame(minWidth: 820, minHeight: 560)
                 .onAppear {
                     if model.allowsBusinessTransfers { delegate.connectTransferProgress(model) }
                     delegate.navigation = navigation
@@ -44,8 +55,8 @@ import AppKit
             AppNavigationCommands(navigation: navigation)
             UpdateCommands(updates: updates, enabled: runtimeProfile.updatesEnabled)
             CommandGroup(after: .pasteboard) {
-                Button("添加文件…") { model.chooseFiles() }.keyboardShortcut("o").disabled(!model.allowsBusinessTransfers)
-                Button("恢复选中记录") { if let item = model.selectedEntry { model.restore(item) } }.keyboardShortcut("r").disabled(!model.allowsBusinessTransfers)
+                Button(L10n.text("添加文件…")) { model.chooseFiles() }.keyboardShortcut("o").disabled(!model.allowsBusinessTransfers)
+                Button(L10n.text("恢复选中记录")) { if let item = model.selectedEntry { model.restore(item) } }.keyboardShortcut("r").disabled(!model.allowsBusinessTransfers)
             }
         }
         MenuBarExtra(isInserted: .constant(!runtimeProfile.isUpdateTest)) {
@@ -53,7 +64,7 @@ import AppKit
         } label: {
             if model.transferSnapshot.isActive {
                 Label(model.transferMenuTitle, systemImage: "arrow.up.circle.fill")
-            } else { Image(systemName: "bolt.fill").accessibilityLabel("闪传") }
+            } else { Image(systemName: "bolt.fill").accessibilityLabel(L10n.text("闪传")) }
         }
     }
 }
@@ -63,7 +74,7 @@ struct UpdateCommands: Commands {
     @Environment(\.openWindow) private var openWindow
     var body: some Commands {
         CommandGroup(after: .appInfo) {
-            Button("检查更新…") {
+            Button(L10n.text("检查更新…")) {
                 guard enabled else { return }
                 openWindow(id: "main")
                 NSApp.activate(ignoringOtherApps: true)
@@ -112,27 +123,27 @@ struct MenuContents: View {
     @ObservedObject var navigation: AppNavigation
     @Environment(\.openWindow) private var openWindow
     var body: some View {
-        Button("显示窗口") { openWindow(id: "main"); NSApp.activate(ignoringOtherApps: true) }
-        Button("配置中心") {
+        Button(L10n.text("显示窗口")) { openWindow(id: "main"); NSApp.activate(ignoringOtherApps: true) }
+        Button(L10n.text("配置中心")) {
             navigation.select(.settings)
             openWindow(id: "main")
             NSApp.activate(ignoringOtherApps: true)
         }
-        Button("复制并发送前台内容") { model.copyInFrontmostApplication() }
-        Button("粘贴到前台应用") { model.pasteInFrontmostApplication() }
+        Button(L10n.text("复制并发送前台内容")) { model.copyInFrontmostApplication() }
+        Button(L10n.text("粘贴到前台应用")) { model.pasteInFrontmostApplication() }
         Divider()
         if model.transferSnapshot.isActive {
-            Text(model.privacy ? "文件传输" : model.transferSnapshot.title).lineLimit(1)
+            Text(model.privacy ? L10n.text("文件传输") : model.transferSnapshot.title).lineLimit(1)
             Text(model.transferMenuTitle)
         }
-        Button("显示传输进度") { model.showTransferProgressCard?() }
+        Button(L10n.text("显示传输进度")) { model.showTransferProgressCard?() }
             .disabled(!model.transferSnapshot.isActive && !model.transferSnapshot.isTerminal)
         Divider()
-        Text("普通复制不记录、不上传")
+        Text(L10n.text("普通复制不记录、不上传"))
         Divider()
-        Button("添加文件…") { model.chooseFiles() }
-        Button("取消所有传输") { model.cancelAll() }.disabled(model.activeTransfer.isEmpty && model.queued == 0)
+        Button(L10n.text("添加文件…")) { model.chooseFiles() }
+        Button(L10n.text("取消所有传输")) { model.cancelAll() }.disabled(model.activeTransfer.isEmpty && model.queued == 0)
         Divider()
-        Button("退出") { NSApp.terminate(nil) }.keyboardShortcut("q")
+        Button(L10n.text("退出")) { NSApp.terminate(nil) }.keyboardShortcut("q")
     }
 }

@@ -23,8 +23,9 @@ public partial class SettingsPage : System.Windows.Controls.UserControl
         DataContext = viewModel;
         _initializing = true;
         InitializeComponent();
+        LanguageSelector.SelectedValue = viewModel.Settings.Language;
         NetworkModeSelector.SelectedIndex = (int)viewModel.Settings.NetworkMode;
-        DefaultReceivePath.Text = "留空使用：" + NetworkPolicy.ResolveReceiveDirectory("");
+        DefaultReceivePath.Text = L.T("留空使用：") + NetworkPolicy.ResolveReceiveDirectory("");
         PasswordBox.Password = viewModel.GetPasswordForEditing();
         CopyHotkey.Text = viewModel.Settings.Shortcuts.Copy.DisplayName;
         PasteHotkey.Text = viewModel.Settings.Shortcuts.Paste.DisplayName;
@@ -47,11 +48,18 @@ public partial class SettingsPage : System.Windows.Controls.UserControl
         _viewModel.SettingsEdited();
     }
 
+    private void LanguageChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_initializing || LanguageSelector.SelectedValue is not string language) return;
+        _viewModel.Settings.Language = language;
+        _viewModel.SettingsEdited();
+    }
+
     private void BrowseReceiveDirectory(object sender, RoutedEventArgs e)
     {
         using var dialog = new System.Windows.Forms.FolderBrowserDialog
         {
-            Description = "选择内网接收文件和文件夹的保存位置",
+            Description = L.T("选择内网接收文件和文件夹的保存位置"),
             UseDescriptionForTitle = true,
             ShowNewFolderButton = true
         };
@@ -169,7 +177,7 @@ public partial class SettingsPage : System.Windows.Controls.UserControl
             .FirstOrDefault(Validation.GetHasError);
         if (invalid is not null)
         {
-            PageValidation.Text = "配置尚未保存：请修正标红的输入值后再离开此页面。";
+            PageValidation.Text = L.T("配置尚未保存：请修正标红的输入值后再离开此页面。");
             PageValidation.Visibility = Visibility.Visible;
             invalid.BringIntoView();
             invalid.Focus();

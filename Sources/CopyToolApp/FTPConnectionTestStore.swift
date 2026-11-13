@@ -12,15 +12,15 @@ struct FTPConnectionTestInput: Equatable, Sendable {
     func settings() throws -> FTPSettings {
         guard !host.isEmpty,
               !host.unicodeScalars.contains(where: { CharacterSet.whitespacesAndNewlines.contains($0) }) else {
-            throw FTPConnectionTestError.invalidSettings("请填写不含空白字符的 FTP 主机名或 IP。")
+            throw FTPConnectionTestError.invalidSettings(L10n.text("请填写不含空白字符的 FTP 主机名或 IP。"))
         }
         guard !portText.isEmpty,
               portText.utf8.allSatisfy({ (48...57).contains($0) }),
               let port = Int(portText), (1...65535).contains(port) else {
-            throw FTPConnectionTestError.invalidSettings("FTP 端口须为 1–65535 的十进制数字。")
+            throw FTPConnectionTestError.invalidSettings(L10n.text("FTP 端口须为 1–65535 的十进制数字。"))
         }
         guard directory.hasPrefix("/") else {
-            throw FTPConnectionTestError.invalidSettings("FTP 目标目录须以 / 开头；服务器根目录请填写 /。")
+            throw FTPConnectionTestError.invalidSettings(L10n.text("FTP 目标目录须以 / 开头；服务器根目录请填写 /。"))
         }
         return FTPSettings(host: host, port: port, username: username,
                            password: password, directory: directory)
@@ -42,8 +42,8 @@ extension FTPConnectionTest: FTPConnectionTesting {}
         var text: String {
             switch self {
             case .idle: return ""
-            case .testing: return "正在测试 FTP 连接…"
-            case .success: return "连接成功，已登录且目标目录可访问。"
+            case .testing: return L10n.text("正在测试 FTP 连接…")
+            case .success: return L10n.text("连接成功，已登录且目标目录可访问。")
             case .failed(let message): return message
             }
         }
@@ -116,10 +116,10 @@ extension FTPConnectionTest: FTPConnectionTesting {}
     private nonisolated static func safeErrorMessage(_ error: Error, password: String) -> String {
         // 仅显示 Core 定义的错误，第三方/系统错误文本可能带出服务器回显或凭据。
         guard let connectionError = error as? FTPConnectionTestError else {
-            return "FTP 连接测试失败，请检查服务状态和配置。"
+            return L10n.text("FTP 连接测试失败，请检查服务状态和配置。")
         }
-        var message = connectionError.errorDescription ?? "FTP 连接测试失败。"
-        if !password.isEmpty { message = message.replacingOccurrences(of: password, with: "[已隐藏]") }
+        var message = connectionError.errorDescription ?? L10n.text("FTP 连接测试失败。")
+        if !password.isEmpty { message = message.replacingOccurrences(of: password, with: L10n.text("[已隐藏]")) }
         let scalars = message.unicodeScalars.filter { !CharacterSet.controlCharacters.contains($0) }
         return String(String(String.UnicodeScalarView(scalars)).prefix(500))
     }

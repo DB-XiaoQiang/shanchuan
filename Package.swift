@@ -1,12 +1,12 @@
 // swift-tools-version: 5.9
 import PackageDescription
-let package = Package(name: "CopyTool", platforms: [.macOS(.v13)], products: [
+let package = Package(name: "CopyTool", defaultLocalization: "zh-Hans", platforms: [.macOS(.v13)], products: [
     .executable(name: "CopyTool", targets: ["CopyToolApp"]),
     .library(name: "CopyToolCore", targets: ["CopyToolCore"])
 ], dependencies: [
     .package(url: "https://github.com/sparkle-project/Sparkle", exact: "2.10.1")
 ], targets: [
-    .target(name: "CopyToolCore"),
+    .target(name: "CopyToolCore", resources: [.process("Resources")]),
     .executableTarget(name: "CopyToolApp", dependencies: ["CopyToolCore", .product(name: "Sparkle", package: "Sparkle")],
         linkerSettings: [.unsafeFlags(["-Xlinker", "-rpath", "-Xlinker", "@executable_path/../Frameworks"])]),
     .testTarget(name: "CopyToolCoreTests", dependencies: ["CopyToolCore"]),

@@ -1,3 +1,4 @@
+import CopyToolCore
 import AppKit
 import SwiftUI
 
@@ -7,10 +8,10 @@ import SwiftUI
         case history, logs, settings, about
         var title: String {
             switch self {
-            case .history: return "剪贴板记录"
-            case .logs: return "传输日志"
-            case .settings: return "配置中心"
-            case .about: return "使用说明"
+            case .history: return L10n.text("剪贴板记录")
+            case .logs: return L10n.text("传输日志")
+            case .settings: return L10n.text("配置中心")
+            case .about: return L10n.text("使用说明")
             }
         }
     }
@@ -35,7 +36,7 @@ struct AppNavigationCommands: Commands {
     @Environment(\.openWindow) private var openWindow
     var body: some Commands {
         CommandGroup(replacing: .appSettings) {
-            Button("配置中心…") {
+            Button(L10n.text("配置中心…")) {
                 navigation.select(.settings)
                 openWindow(id: "main")
                 NSApp.activate(ignoringOtherApps: true)

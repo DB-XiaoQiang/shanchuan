@@ -4,7 +4,7 @@ using System.Windows.Interop;
 using Shanchuan.Core;
 using Shanchuan.Windows.Services;
 using Shanchuan.Windows.ViewModels;
-using MessageBox = System.Windows.MessageBox;
+using MessageBox = Shanchuan.Windows.LocalizedMessageBox;
 
 namespace Shanchuan.Windows;
 
@@ -25,6 +25,11 @@ public partial class App : System.Windows.Application
     [STAThread]
     public static void Main(string[] args)
     {
+        // Apply the explicit app language before creating WPF or updater windows.
+        try { L.Configure(new SettingsStore(AppDataPaths.DefaultRoot).Load().Language); }
+        catch { L.Configure(L.DefaultLanguage); }
+        FrameworkElement.LanguageProperty.OverrideMetadata(typeof(FrameworkElement),
+            new FrameworkPropertyMetadata(System.Windows.Markup.XmlLanguage.GetLanguage(L.CurrentLanguage)));
         Velopack.VelopackApp.Build().SetAutoApplyOnStartup(false).Run();
         var app = new App();
         app.InitializeComponent();
@@ -37,7 +42,7 @@ public partial class App : System.Windows.Application
         _mutex = new Mutex(true, MutexName, out _ownsMutex);
         if (!_ownsMutex)
         {
-            MessageBox.Show("闪传已经在运行，请通过任务栏托盘打开。", "闪传",
+            MessageBox.Show(L.T("闪传已经在运行，请通过任务栏托盘打开。"), L.T("闪传"),
                 MessageBoxButton.OK, MessageBoxImage.Information);
             Shutdown();
             return;
@@ -51,10 +56,10 @@ public partial class App : System.Windows.Application
         var credentials = new WindowsCredentialStore();
         var startupErrors = new List<string>();
 
-        var settings = Load("配置", () => settingsStore.Load(), new AppSettings(), startupErrors);
-        var password = Load("FTP 密码", () => credentials.Read() ?? "", "", startupErrors);
-        var history = Load("历史记录", () => _historyStore.Load(), new List<HistoryEntry>(), startupErrors);
-        var logs = Load("传输日志", logStore.Load, new List<TransferLogEntry>(), startupErrors);
+        var settings = Load(L.T("配置"), () => settingsStore.Load(), new AppSettings(), startupErrors);
+        var password = Load(L.T("FTP 密码"), () => credentials.Read() ?? "", "", startupErrors);
+        var history = Load(L.T("历史记录"), () => _historyStore.Load(), new List<HistoryEntry>(), startupErrors);
+        var logs = Load(L.T("传输日志"), logStore.Load, new List<TransferLogEntry>(), startupErrors);
 
         _viewModel = new AppViewModel(settings, password, settingsStore, _historyStore, logStore,
             credentials, new FtpTransferService(), new FtpReceiveService(new ReceiveStateStore(root)), history, logs);
@@ -76,7 +81,7 @@ public partial class App : System.Windows.Application
         _viewModel.Updates.Start();
 
         if (startupErrors.Count > 0)
-            MessageBox.Show(string.Join("\n", startupErrors), "部分本机数据未能读取",
+            MessageBox.Show(string.Join("\n", startupErrors), L.T("部分本机数据未能读取"),
                 MessageBoxButton.OK, MessageBoxImage.Warning);
     }
 
@@ -113,7 +118,7 @@ public partial class App : System.Windows.Application
         }
         catch (Exception error) { _viewModel.ReportHotkeyError(error.Message); }
         try { WindowsStartupService.Apply(_viewModel.Settings.StartWithWindows); }
-        catch (Exception error) { _viewModel.ReportActionError("登录启动设置失败：" + error.Message); }
+        catch (Exception error) { _viewModel.ReportActionError(L.T("登录启动设置失败：") + error.Message); }
         _progressWindow?.ApplyPreferences();
     }
 
@@ -122,12 +127,12 @@ public partial class App : System.Windows.Application
         if (_viewModel is null || _historyStore is null) return;
         if (!_viewModel.CanSend)
         {
-            _viewModel.ReportActionError("当前不是外网（只发送）模式，已阻止复制上传。请检查配置中心的网络位置。");
+            _viewModel.ReportActionError(L.T("当前不是外网（只发送）模式，已阻止复制上传。请检查配置中心的网络位置。"));
             return;
         }
         if (Interlocked.CompareExchange(ref _copyInProgress, 1, 0) != 0)
         {
-            _viewModel.ReportActionError("上一次复制内容仍在捕获中，请稍候再按快捷键。");
+            _viewModel.ReportActionError(L.T("上一次复制内容仍在捕获中，请稍候再按快捷键。"));
             return;
         }
         _viewModel.SetCopyCaptureInProgress(true);
@@ -143,7 +148,7 @@ public partial class App : System.Windows.Application
                 case HistoryKind.File: _viewModel.EnqueuePaths(captured.Paths); break;
             }
         }
-        catch (Exception error) { _viewModel.ReportActionError("复制捕获失败：" + error.Message); }
+        catch (Exception error) { _viewModel.ReportActionError(L.T("复制捕获失败：") + error.Message); }
         finally
         {
             _viewModel.SetCopyCaptureInProgress(false);
@@ -159,7 +164,7 @@ public partial class App : System.Windows.Application
             await SendInputService.WaitForModifiersReleasedAsync();
             await SendInputService.SendPasteAsync();
         }
-        catch (Exception error) { _viewModel.ReportActionError("粘贴失败：" + error.Message); }
+        catch (Exception error) { _viewModel.ReportActionError(L.T("粘贴失败：") + error.Message); }
     }
 
     private void ShowMainWindow()

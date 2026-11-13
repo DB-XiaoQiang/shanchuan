@@ -26,10 +26,10 @@ public enum TransferProtocolError: Error, LocalizedError {
     case invalidName(String), duplicateEntity(String), emptyFiles, invalidDirectory
     public var errorDescription: String? {
         switch self {
-        case .invalidName(let name): return "协议不能安全表示文件名：\(name)"
-        case .duplicateEntity(let name): return "多个文件映射为同一远端实体：\(name)"
-        case .emptyFiles: return "没有可发送的文件。"
-        case .invalidDirectory: return "远端目录无效。"
+        case .invalidName(let name): return L10n.format("协议不能安全表示文件名：%@", String(describing: name))
+        case .duplicateEntity(let name): return L10n.format("多个文件映射为同一远端实体：%@", String(describing: name))
+        case .emptyFiles: return L10n.text("没有可发送的文件。")
+        case .invalidDirectory: return L10n.text("远端目录无效。")
         }
     }
 }

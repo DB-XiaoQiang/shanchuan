@@ -15,7 +15,7 @@ import CopyToolCore
         autosave.connect(current: { [weak model] in
             (model?.preferences ?? AppPreferences(), model?.password ?? "")
         }, save: { [weak model] values, password in
-            guard let model else { return "设置尚未就绪" }
+            guard let model else { return L10n.text("设置尚未就绪") }
             guard model.saveSettings(preferences: values, password: password) else { return model.settingsError }
             return nil
         })

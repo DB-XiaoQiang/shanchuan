@@ -15,7 +15,7 @@ public sealed class DirectoryExclusions
     {
         text ??= "";
         if (Encoding.UTF8.GetByteCount(text) > 65_536)
-            throw new ArgumentException("目录排除规则过长，请控制在 64 KB 内。");
+            throw new ArgumentException(L.T("目录排除规则过长，请控制在 64 KB 内。"));
 
         var rules = new List<Rule>();
         var lines = text.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
@@ -24,11 +24,11 @@ public sealed class DirectoryExclusions
             var line = lines[index].Trim();
             if (line.Length == 0 || line.StartsWith('#')) continue;
             if (Encoding.UTF8.GetByteCount(line) > 512)
-                throw Error(index, "单条规则不能超过 512 字节");
+                throw Error(index, L.T("单条规则不能超过 512 字节"));
             if (line.StartsWith('!'))
-                throw Error(index, "不支持 ! 反向规则，请只填写要排除的名称或路径");
+                throw Error(index, L.T("不支持 ! 反向规则，请只填写要排除的名称或路径"));
             if (line.Contains('\\') || line.Any(char.IsControl))
-                throw Error(index, "路径请使用 /，规则不能含控制字符或反斜杠");
+                throw Error(index, L.T("路径请使用 /，规则不能含控制字符或反斜杠"));
 
             var directoriesOnly = line.EndsWith('/');
             var anchored = line.StartsWith('/');
@@ -36,10 +36,10 @@ public sealed class DirectoryExclusions
             if (directoriesOnly && line.Length > 0) line = line[..^1];
             var components = line.Split('/');
             if (components.Any(component => component.Length == 0 || component is "." or ".."))
-                throw Error(index, "请填写有效的相对路径，不能包含 . 或 .. 路径段");
+                throw Error(index, L.T("请填写有效的相对路径，不能包含 . 或 .. 路径段"));
 
             rules.Add(new Rule(components, directoriesOnly, !anchored && components.Length == 1));
-            if (rules.Count > 200) throw new ArgumentException("目录排除规则最多支持 200 条。");
+            if (rules.Count > 200) throw new ArgumentException(L.T("目录排除规则最多支持 200 条。"));
         }
         return new DirectoryExclusions(rules);
     }
@@ -75,7 +75,7 @@ public sealed class DirectoryExclusions
     }
 
     private static ArgumentException Error(int index, string message) =>
-        new($"目录排除规则第 {index + 1} 行：{message}。");
+        new(L.F($"目录排除规则第 {index + 1} 行：{message}。"));
 
     private static bool ComponentMatches(string pattern, string name)
     {

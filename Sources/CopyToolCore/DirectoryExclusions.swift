@@ -13,19 +13,19 @@ public struct DirectoryExclusions: Sendable {
 
     public init(_ text: String) throws {
         guard text.utf8.count <= 65_536 else {
-            throw FTPTransferError.invalidSettings("目录排除规则过长，请控制在 64 KB 内。")
+            throw FTPTransferError.invalidSettings(L10n.text("目录排除规则过长，请控制在 64 KB 内。"))
         }
         var result: [Rule] = []
         for (index, raw) in text.replacingOccurrences(of: "\r\n", with: "\n").components(separatedBy: "\n").enumerated() {
             let line = raw.trimmingCharacters(in: .whitespaces)
             if line.isEmpty || line.hasPrefix("#") { continue }
             let reason: String?
-            if line.utf8.count > 512 { reason = "单条规则不能超过 512 字节" }
-            else if line.hasPrefix("!") { reason = "不支持 ! 反向规则，请只填写要排除的名称或路径" }
+            if line.utf8.count > 512 { reason = L10n.text("单条规则不能超过 512 字节") }
+            else if line.hasPrefix("!") { reason = L10n.text("不支持 ! 反向规则，请只填写要排除的名称或路径") }
             else if line.contains("\\") || line.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) {
-                reason = "路径请使用 /，规则不能含控制字符或反斜杠"
+                reason = L10n.text("路径请使用 /，规则不能含控制字符或反斜杠")
             } else { reason = nil }
-            if let reason { throw FTPTransferError.invalidSettings("目录排除规则第 \(index + 1) 行：\(reason)。") }
+            if let reason { throw FTPTransferError.invalidSettings(L10n.format("目录排除规则第 %@ 行：%@。", String(describing: index + 1), String(describing: reason))) }
             let directoriesOnly = line.hasSuffix("/")
             let anchored = line.hasPrefix("/")
             var pattern = line
@@ -33,11 +33,11 @@ public struct DirectoryExclusions: Sendable {
             if directoriesOnly && !pattern.isEmpty { pattern.removeLast() }
             let components = pattern.components(separatedBy: "/")
             guard !components.contains(where: { $0.isEmpty || $0 == "." || $0 == ".." }) else {
-                throw FTPTransferError.invalidSettings("目录排除规则第 \(index + 1) 行：请填写有效的相对路径，不能包含 . 或 .. 路径段。")
+                throw FTPTransferError.invalidSettings(L10n.format("目录排除规则第 %@ 行：请填写有效的相对路径，不能包含 . 或 .. 路径段。", String(describing: index + 1)))
             }
             result.append(Rule(components: components, directoriesOnly: directoriesOnly,
                 basenameOnly: !anchored && components.count == 1))
-            guard result.count <= 200 else { throw FTPTransferError.invalidSettings("目录排除规则最多支持 200 条。") }
+            guard result.count <= 200 else { throw FTPTransferError.invalidSettings(L10n.text("目录排除规则最多支持 200 条。")) }
         }
         rules = result
     }
@@ -110,7 +110,7 @@ enum FilteredDirectorySnapshot {
                 } else if values.isRegularFile == true {
                     try copyFile(child, output, checkCancellation: checkCancellation)
                 } else {
-                    throw FTPTransferError.failed(-1, "目录中包含不支持的特殊文件，已停止打包。")
+                    throw FTPTransferError.failed(-1, L10n.text("目录中包含不支持的特殊文件，已停止打包。"))
                 }
             }
         }
@@ -127,7 +127,7 @@ enum FilteredDirectorySnapshot {
         var status = stat()
         guard fstat(descriptor, &status) == 0, (status.st_mode & S_IFMT) == S_IFREG else { throw FTPTransferError.invalidFile }
         guard FileManager.default.createFile(atPath: destination.path, contents: nil, attributes: [.posixPermissions: 0o600]) else {
-            throw FTPTransferError.failed(-1, "无法创建目录打包的临时副本。")
+            throw FTPTransferError.failed(-1, L10n.text("无法创建目录打包的临时副本。"))
         }
         let output = try FileHandle(forWritingTo: destination)
         defer { try? output.close() }

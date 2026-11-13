@@ -11,22 +11,22 @@ struct DirectoryExclusionEditorView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("编辑目录排除规则").font(.title2).bold()
-            Text("每行一条，修改后自动保存。留空发送全部内容；直接发送单个文件不受影响。")
+            Text(L10n.text("编辑目录排除规则")).font(.title2).bold()
+            Text(L10n.text("每行一条，修改后自动保存。留空发送全部内容；直接发送单个文件不受影响。"))
                 .font(.callout).foregroundStyle(.secondary)
             HStack {
-                Button("添加常用规则") {
+                Button(L10n.text("添加常用规则")) {
                     commitInput()
                     addCommonRules()
                 }
-                Button("清空规则") { commitInput(); rules = "" }.disabled(rules.isEmpty)
+                Button(L10n.text("清空规则")) { commitInput(); rules = "" }.disabled(rules.isEmpty)
                 Spacer()
-                Text("支持 # 注释").font(.caption).foregroundStyle(.secondary)
+                Text(L10n.text("支持 # 注释")).font(.caption).foregroundStyle(.secondary)
             }
             DirectoryRuleTextEditor(text: $rules)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .overlay(RoundedRectangle(cornerRadius: 5).stroke(.secondary.opacity(0.35)))
-            Text("名称匹配任意层级；带 / 的路径相对于所选目录。支持 *、? 和跨层级 **；末尾 / 仅匹配文件夹。区分大小写。")
+            Text(L10n.text("名称匹配任意层级；带 / 的路径相对于所选目录。支持 *、? 和跨层级 **；末尾 / 仅匹配文件夹。区分大小写。"))
                 .font(.caption).foregroundStyle(.secondary)
             if let validationError {
                 Text(validationError).font(.callout).foregroundStyle(.red)
@@ -37,7 +37,7 @@ struct DirectoryExclusionEditorView: View {
                     .foregroundStyle(saveFailed ? .red : .secondary)
                     .accessibilityIdentifier("exclusion-editor-save-status")
                 Spacer()
-                Button("完成", action: finish)
+                Button(L10n.text("完成"), action: finish)
                     .keyboardShortcut(.return, modifiers: .command)
                     .disabled(validationError != nil)
                     .accessibilityIdentifier("finish-exclusion-editor")

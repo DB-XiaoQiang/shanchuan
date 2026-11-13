@@ -22,7 +22,7 @@ import Combine
     var previewTransferProgress: (() -> Void)?
     var showTransferProgressCard: (() -> Void)?
     var flushSettings: (() -> Void)?
-    @Published var message = "准备就绪 · 尚未配置 FTP"
+    @Published var message = L10n.text("准备就绪 · 尚未配置 FTP")
     @Published var logs: [String] = []
     @Published private(set) var transferLogs: [TransferLogEntry] = []
     @Published var logPersistenceError = ""
@@ -59,12 +59,12 @@ import Combine
     var transferLogFile: URL { logRepository.file }
     var transferMenuTitle: String {
         switch transferSnapshot.phase {
-        case .preparing: return "准备中"
-        case .cancelling: return "正在取消"
-        case .publishing: return "正在完成"
+        case .preparing: return L10n.text("准备中")
+        case .cancelling: return L10n.text("正在取消")
+        case .publishing: return L10n.text("正在完成")
         case .uploading:
-            return transferSnapshot.fraction.map { "\(Int($0 * 100))%" } ?? "上传中"
-        default: return "闪传"
+            return transferSnapshot.fraction.map { "\(Int($0 * 100))%" } ?? L10n.text("上传中")
+        default: return L10n.text("闪传")
         }
     }
 
@@ -78,7 +78,7 @@ import Combine
             self.readPassword = { "" }
             self.writePassword = { value in
                 guard value.isEmpty else { throw NSError(domain: "ShanchuanUpdateTest", code: 1,
-                    userInfo: [NSLocalizedDescriptionKey: "独立更新测试不保存 FTP 密码。"] ) }
+                    userInfo: [NSLocalizedDescriptionKey: L10n.text("独立更新测试不保存 FTP 密码。")] ) }
             }
         } else {
             self.sendFailureNotice = sendFailureNotice ?? (root == nil ? { FailureNotifications.shared.send($0) } : { _ in })
@@ -88,15 +88,15 @@ import Combine
         let base = root ?? runtimeProfile.dataRoot
         logRepository = TransferLogRepository(root: base)
         do { repository = try HistoryRepository(root: base) }
-        catch { fatalError("无法建立应用数据目录：\(error.localizedDescription)") }
+        catch { fatalError(L10n.format("无法建立应用数据目录：%@", String(describing: error.localizedDescription))) }
         do {
             let config = base.appendingPathComponent("preferences.json")
             if FileManager.default.fileExists(atPath: config.path) { preferences = try JSONDecoder().decode(AppPreferences.self, from: Data(contentsOf: config)) }
             entries = repository.prune(try repository.load(), days: preferences.ttlDays)
             try repository.save(entries)
-        } catch { message = "读取本地数据失败：\(error.localizedDescription)" }
+        } catch { message = L10n.format("读取本地数据失败：%@", String(describing: error.localizedDescription)) }
         // Password is read only when needed; first launch never requests keychain access.
-        if !preferences.host.isEmpty { password = self.readPassword(); message = "FTP 已配置 · 等待发送" }
+        if !preferences.host.isEmpty { password = self.readPassword(); message = L10n.text("FTP 已配置 · 等待发送") }
         persistedPassword = password
         loadTransferLogs()
         if runtimeProfile.isUpdateTest {
@@ -104,14 +104,14 @@ import Combine
             if preferences.host.isEmpty { preferences.host = "update-test.invalid" }
             if preferences.username.isEmpty { preferences.username = "update-test" }
             preferences.shortcuts.enabled = false
-            message = "独立更新测试 · 普通传输、剪贴板与全局快捷键已停用"
-            shortcutStatus = "独立更新测试不注册全局快捷键或申请辅助功能权限。"
+            message = L10n.text("独立更新测试 · 普通传输、剪贴板与全局快捷键已停用")
+            shortcutStatus = L10n.text("独立更新测试不注册全局快捷键或申请辅助功能权限。")
             return
         }
         do { try shortcutService.apply(preferences.shortcuts) }
         catch {
             shortcutSettingsError = error.localizedDescription
-            log("快捷键初始化失败：" + shortcutSettingsError, level: .error)
+            log(L10n.text("快捷键初始化失败：") + shortcutSettingsError, level: .error)
         }
         refreshShortcutPermission()
         shortcutActivationObserver = NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)
@@ -123,8 +123,8 @@ import Combine
     }
     func recordShortcutStatus(_ status: String) {
         shortcutStatus = status
-        let warning = ["未发送", "未执行", "未能", "已取消", "不可", "无法"].contains { status.contains($0) }
-        log("快捷键：" + status, level: warning ? .warning : .info)
+        let warning = [L10n.text("未发送"), L10n.text("未执行"), L10n.text("未能"), L10n.text("已取消"), L10n.text("不可"), L10n.text("无法")].contains { status.localizedCaseInsensitiveContains($0) }
+        log(L10n.text("快捷键：") + status, level: warning ? .warning : .info)
     }
     func openShortcutAccessibilitySettings() { guard allowsBusinessTransfers else { return }; shortcutService.openAccessibilitySettings() }
     func copyInFrontmostApplication() { guard allowsBusinessTransfers else { return }; shortcutService.copyInFrontmostApplication() }
@@ -135,7 +135,7 @@ import Combine
         catch { shortcutSettingsError = error.localizedDescription }
     }
     @discardableResult func saveShortcutConfiguration(_ config: CopyPasteShortcuts) -> Bool {
-        guard allowsBusinessTransfers else { shortcutSettingsError = "独立更新测试不启用全局快捷键。"; return false }
+        guard allowsBusinessTransfers else { shortcutSettingsError = L10n.text("独立更新测试不启用全局快捷键。"); return false }
         shortcutSettingsError = ""
         if let issue = config.validationError { shortcutSettingsError = issue; return false }
         let previous = preferences.shortcuts
@@ -148,7 +148,9 @@ import Combine
             try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
             preferences = values
             refreshShortcutPermission()
-            shortcutStatus = config.enabled ? "已启用：复制 " + config.copy.displayName + "，粘贴 " + config.paste.displayName : "全局复制 / 粘贴快捷键已关闭"
+            shortcutStatus = config.enabled
+                ? L10n.format("已启用：复制 %@，粘贴 %@", config.copy.displayName, config.paste.displayName)
+                : L10n.text("全局复制 / 粘贴快捷键已关闭")
             return true
         } catch {
             preferences.shortcuts = previous
@@ -181,31 +183,31 @@ import Combine
                     default: return nil
                     }
                     let result = ["发送中", "等待发送"].contains(entry.status)
-                        ? "当时状态为\(entry.status)，最终结果未知" : entry.status
+                        ? L10n.format("当时状态为%@，最终结果未知", String(describing: L10n.text(entry.status))) : L10n.text(entry.status)
                     return TransferLogEntry(id: entry.id, date: entry.date, level: level,
-                        message: sanitizedLogMessage("历史记录恢复：\(transferSubject(entry)) · \(result)（时间为记录创建时间，非上传完成时间）"))
+                        message: sanitizedLogMessage(L10n.format("历史记录恢复：%@ · %@（时间为记录创建时间，非上传完成时间）", String(describing: transferSubject(entry)), String(describing: result))))
                 }
                 transferLogs = Array(transferLogs.prefix(logRepository.limit))
                 saveTransferLogs()
             }
         } catch {
             logFileReadFailed = true
-            logPersistenceError = "读取日志失败，原文件已保留；新日志暂时仅在本次运行中显示：" + error.localizedDescription
+            logPersistenceError = L10n.text("读取日志失败，原文件已保留；新日志暂时仅在本次运行中显示：") + error.localizedDescription
         }
         updateLogText()
     }
     private func saveTransferLogs() {
         guard !logFileReadFailed else { return }
         do { try logRepository.save(transferLogs); logPersistenceError = "" }
-        catch { logPersistenceError = "日志尚未保存到磁盘：" + error.localizedDescription }
+        catch { logPersistenceError = L10n.text("日志尚未保存到磁盘：") + error.localizedDescription }
     }
     private func updateLogText() {
-        logs = transferLogs.map { "\($0.date.formatted(date: .numeric, time: .standard))  \($0.message)" }
+        logs = transferLogs.map { "\(L10n.date($0.date, date: .numeric, time: .standard))  \($0.message)" }
     }
     private func sanitizedLogMessage(_ text: String) -> String {
         var value = text
         for secret in Set([password, persistedPassword]).filter({ !$0.isEmpty }).sorted(by: { $0.count > $1.count }) {
-            value = value.replacingOccurrences(of: secret, with: "[已隐藏]")
+            value = value.replacingOccurrences(of: secret, with: L10n.text("[已隐藏]"))
         }
         value = value.components(separatedBy: .controlCharacters).joined(separator: " ")
         return String(value.prefix(2048))
@@ -213,16 +215,16 @@ import Combine
     private func transferSubject(_ entry: HistoryEntry) -> String {
         let name: String
         switch entry.kind {
-        case .text: name = "文本"
-        case .image: name = "图片"
+        case .text: name = L10n.text("文本")
+        case .image: name = L10n.text("图片")
         case .file:
-            let filenames = entry.paths.map { URL(fileURLWithPath: $0).lastPathComponent }.joined(separator: "、")
-            name = filenames.isEmpty ? "文件" : String(filenames.prefix(240))
+            let filenames = entry.paths.map { URL(fileURLWithPath: $0).lastPathComponent }.joined(separator: L10n.text("、"))
+            name = filenames.isEmpty ? L10n.text("文件") : String(filenames.prefix(240))
         }
-        return "\(name) [记录 \(entry.id.uuidString.prefix(8))]"
+        return L10n.format("%@ [记录 %@]", String(describing: name), String(describing: entry.id.uuidString.prefix(8)))
     }
     func persist() {
-        do { try repository.save(entries) } catch { log("保存历史失败：\(error.localizedDescription)", level: .error) }
+        do { try repository.save(entries) } catch { log(L10n.format("保存历史失败：%@", String(describing: error.localizedDescription)), level: .error) }
     }
     @discardableResult func saveSettings(preferences candidate: AppPreferences? = nil,
                                        password candidatePassword: String? = nil) -> Bool {
@@ -239,19 +241,19 @@ import Combine
             try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: root.appendingPathComponent("preferences.json").path)
             preferences = values; password = secret; persistedPassword = secret
             entries = repository.prune(entries, days: values.ttlDays)
-            persist(); log("配置已自动保存")
+            persist(); log(L10n.text("配置已自动保存"))
             return true
         } catch {
             if passwordWritten {
                 do { try writePassword(oldSecret) }
-                catch { settingsError = "配置保存失败，密码恢复也未完成，请重新检查 FTP 密码"; return false }
+                catch { settingsError = L10n.text("配置保存失败，密码恢复也未完成，请重新检查 FTP 密码"); return false }
             }
             settingsError = error.localizedDescription
             return false
         }
     }
     func migrateOriginalFTP() {
-        guard allowsBusinessTransfers else { settingsError = "独立更新测试不迁移原应用配置。"; return }
+        guard allowsBusinessTransfers else { settingsError = L10n.text("独立更新测试不迁移原应用配置。"); return }
         settingsError = ""
         let source = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".copy_tool/config.toml")
         let previous = preferences; let oldPassword = password
@@ -267,26 +269,26 @@ import Combine
             }
             saveSettings(preferences: imported.preferences, password: imported.password)
             guard settingsError.isEmpty else { throw NSError(domain: "CopyTool", code: 1, userInfo: [NSLocalizedDescriptionKey: settingsError]) }
-            guard readPassword() == imported.password else { throw NSError(domain: "CopyTool", code: 2, userInfo: [NSLocalizedDescriptionKey: "钥匙串写入后校验未通过"]) }
-            log("原应用 FTP 配置迁移成功；连接与路由字段已校验")
+            guard readPassword() == imported.password else { throw NSError(domain: "CopyTool", code: 2, userInfo: [NSLocalizedDescriptionKey: L10n.text("钥匙串写入后校验未通过")]) }
+            log(L10n.text("原应用 FTP 配置迁移成功；连接与路由字段已校验"))
         } catch {
             let reason = error.localizedDescription
             preferences = previous; password = oldPassword
             var rollbackError = ""
             if persistedPassword != oldPersistedPassword {
                 do { try writePassword(oldPersistedPassword); persistedPassword = oldPersistedPassword }
-                catch { rollbackError = "；FTP 密码恢复失败，请重新检查密码" }
+                catch { rollbackError = L10n.text("；FTP 密码恢复失败，请重新检查密码") }
             }
             if let oldData { try? oldData.write(to: config, options: .atomic) }
             settingsError = reason + rollbackError
-            log("FTP 配置迁移未完成：" + settingsError, level: .error)
+            log(L10n.text("FTP 配置迁移未完成：") + settingsError, level: .error)
         }
     }
     func sendValidationSamples() {
         guard allowsBusinessTransfers else { return }
-        guard !running, tasks.isEmpty else { log("请等待当前传输完成后再发送验证样例"); return }
-        if let issue = preferences.validationError { log("未发送验证样例：" + issue, level: .error); return }
-        guard !password.isEmpty else { log("未发送验证样例：FTP 密码缺失", level: .error); return }
+        guard !running, tasks.isEmpty else { log(L10n.text("请等待当前传输完成后再发送验证样例")); return }
+        if let issue = preferences.validationError { log(L10n.text("未发送验证样例：") + issue, level: .error); return }
+        guard !password.isEmpty else { log(L10n.text("未发送验证样例：FTP 密码缺失"), level: .error); return }
         do {
             let formatter = DateFormatter(); formatter.dateFormat = "yyyyMMdd-HHmmss"; formatter.timeZone = TimeZone(identifier: "Asia/Shanghai")
             let runID = "rea-copytool-" + formatter.string(from: Date()) + "-" + UUID().uuidString.prefix(8).lowercased()
@@ -301,7 +303,7 @@ import Combine
             let second = nested.appendingPathComponent("check.txt")
             try Data(("REA folder root\n" + runID + "\n").utf8).write(to: first)
             try Data(("REA folder nested\n" + runID + "\n").utf8).write(to: second)
-            let samples = [HistoryEntry(kind: .text, content: text), HistoryEntry(kind: .file, content: "验证文件", paths: [file.path]), HistoryEntry(kind: .file, content: "验证文件夹", paths: [folder.path])]
+            let samples = [HistoryEntry(kind: .text, content: text), HistoryEntry(kind: .file, content: L10n.text("验证文件"), paths: [file.path]), HistoryEntry(kind: .file, content: L10n.text("验证文件夹"), paths: [folder.path])]
             let hashFiles = [file, first, second].map { url -> [String: String] in
                 let data = (try? Data(contentsOf: url)) ?? Data()
                 let hash = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
@@ -310,9 +312,9 @@ import Combine
             let manifest: [String: Any] = ["run_id": runID, "text": text, "file_name": file.lastPathComponent, "folder_name": folder.lastPathComponent, "files": hashFiles, "entry_ids": samples.map { $0.id.uuidString }, "endpoint": preferences.host + ":" + String(preferences.port), "destination": preferences.directory]
             try JSONSerialization.data(withJSONObject: manifest, options: [.prettyPrinted, .sortedKeys]).write(to: runRoot.appendingPathComponent("manifest.json"), options: .atomic)
             entries.insert(contentsOf: samples.reversed(), at: 0); selected = samples.first?.id; persist()
-            log("开始接收验证：" + runID)
+            log(L10n.text("开始接收验证：") + runID)
             for sample in samples { enqueue(sample) }
-        } catch { log("准备验证样例失败：" + error.localizedDescription, level: .error) }
+        } catch { log(L10n.text("准备验证样例失败：") + error.localizedDescription, level: .error) }
     }
     // 只由自定义复制完成回调调用；服务确认本次复制改变了剪贴板后才进入这里。
     // 不监听普通剪贴板变化；仅冻结这次明确复制发送的内容。
@@ -323,7 +325,7 @@ import Combine
     }
     private func captureClipboard(_ pb: NSPasteboard, expectedChangeCount: Int) {
         guard pb.changeCount == expectedChangeCount else {
-            log("自定义复制未发送：剪贴板已变化，请重新复制", level: .warning)
+            log(L10n.text("自定义复制未发送：剪贴板已变化，请重新复制"), level: .warning)
             return
         }
         let snapshot: ClipboardSnapshot?
@@ -335,28 +337,28 @@ import Combine
         else { snapshot = nil }
         // 先冻结内容，再核对版本；读取期间发生其他复制时不发送混合或过期内容。
         guard pb.changeCount == expectedChangeCount else {
-            log("自定义复制未发送：读取期间剪贴板已变化，请重新复制", level: .warning)
+            log(L10n.text("自定义复制未发送：读取期间剪贴板已变化，请重新复制"), level: .warning)
             return
         }
         switch snapshot {
         case .files(let urls): addFiles(urls, automatic: false)
         case .image(let data): addImage(data, automatic: false)
         case .text(let text): add(HistoryEntry(kind: .text, content: text), automatic: false)
-        case nil: log("自定义复制未发送：剪贴板中没有支持的文本、图片或文件", level: .warning)
+        case nil: log(L10n.text("自定义复制未发送：剪贴板中没有支持的文本、图片或文件"), level: .warning)
         }
     }
     func addImage(_ data: Data, automatic: Bool = true) {
         guard allowsBusinessTransfers else { return }
         guard !automatic else { return }
-        do { let file = try repository.saveImage(data); add(HistoryEntry(kind: .image, content: "剪贴板图片", paths: [file.path]), automatic: automatic) }
-        catch { log("图片保存失败：\(error.localizedDescription)", level: .error) }
+        do { let file = try repository.saveImage(data); add(HistoryEntry(kind: .image, content: L10n.text("剪贴板图片"), paths: [file.path]), automatic: automatic) }
+        catch { log(L10n.format("图片保存失败：%@", String(describing: error.localizedDescription)), level: .error) }
     }
     func addFiles(_ urls: [URL], automatic: Bool = true) {
         guard allowsBusinessTransfers else { return }
         guard !automatic else { return }
         let paths = urls.filter(\.isFileURL).map(\.path)
         guard !paths.isEmpty else { return }
-        add(HistoryEntry(kind: .file, content: "\(paths.count) 个文件", paths: paths), automatic: automatic)
+        add(HistoryEntry(kind: .file, content: L10n.format("%@ 个文件", String(describing: paths.count)), paths: paths), automatic: automatic)
     }
     func add(_ item: HistoryEntry, automatic: Bool) {
         guard allowsBusinessTransfers else { return }
@@ -367,7 +369,7 @@ import Combine
             return
         }
         if preferences.historyEnabled { entries.insert(item, at: 0); selected = item.id; persist() }
-        log("准备发送：\(item.kind == .text ? "文本" : item.content)")
+        log(L10n.format("准备发送：%@", String(describing: item.kind == .text ? L10n.text("文本") : item.content)))
         enqueue(item)
     }
     func chooseFiles() {
@@ -381,20 +383,20 @@ import Combine
         if entry.kind == .text { pb.setString(entry.content, forType: .string) }
         else if entry.kind == .image, let path = entry.paths.first, let data = try? Data(contentsOf: URL(fileURLWithPath: path)) { pb.setData(data, forType: .png) }
         else { pb.writeObjects(entry.paths.map { NSURL(fileURLWithPath: $0) }) }
-        log("已恢复到系统剪贴板")
+        log(L10n.text("已恢复到系统剪贴板"))
     }
     func resend(_ entry: HistoryEntry) {
         if preferences.restoreOnResend { restore(entry) }
         enqueue(entry)
     }
     func enqueue(_ entry: HistoryEntry) {
-        guard allowsBusinessTransfers else { log("独立更新测试不执行普通 FTP 传输"); return }
-        guard !updateInstallationIsCommitting else { log("正在安装更新，请稍后再发送", level: .warning); return }
-        if let issue = preferences.validationError { log("未发送：\(issue)", level: .error); return }
-        guard !password.isEmpty else { log("未发送：请在设置中填写密码", level: .error); return }
+        guard allowsBusinessTransfers else { log(L10n.text("独立更新测试不执行普通 FTP 传输")); return }
+        guard !updateInstallationIsCommitting else { log(L10n.text("正在安装更新，请稍后再发送"), level: .warning); return }
+        if let issue = preferences.validationError { log(L10n.format("未发送：%@", String(describing: issue)), level: .error); return }
+        guard !password.isEmpty else { log(L10n.text("未发送：请在设置中填写密码"), level: .error); return }
         tasks.append((entry, preferences, password)); queued = tasks.count
         transferSnapshot.queuedCount = queued
-        log("已加入发送队列：\(transferSubject(entry)) · 等待 \(queued) 项")
+        log(L10n.format("已加入发送队列：%@ · 等待 %@ 项", String(describing: transferSubject(entry)), String(describing: queued)))
         updateStatus(entry.id, "等待发送"); beginNext()
     }
     func updateStatus(_ id: UUID, _ status: String) {
@@ -404,14 +406,14 @@ import Combine
         guard allowsBusinessTransfers else { return }
         guard !running, !tasks.isEmpty else { return }
         let (entry, config, secret) = tasks.removeFirst(); queued = tasks.count
-        running = true; cancelling = false; activeTransfer = entry.kind == .text ? "文本" : entry.title; progress = 0
+        running = true; cancelling = false; activeTransfer = entry.kind == .text ? L10n.text("文本") : entry.title; progress = 0
         let token = UUID()
         activeTransferToken = token; progressFileIndex = -1
         let subject = transferSubject(entry)
         let attempt = String(token.uuidString.prefix(8))
-        log("开始发送：\(subject) · 任务 \(attempt)")
+        log(L10n.format("开始发送：%@ · 任务 %@", String(describing: subject), String(describing: attempt)))
         transferSnapshot = TransferProgressSnapshot(id: token, phase: .preparing, title: activeTransfer,
-            queuedCount: queued, detail: "正在准备文件…")
+            queuedCount: queued, detail: L10n.text("正在准备文件…"))
         updateStatus(entry.id, "发送中")
         let ftp = FTPSettings(host: config.host, port: config.port, username: config.username, password: secret, directory: config.directory)
         let transfer = self.transfer
@@ -438,10 +440,10 @@ import Combine
                             return sum.overflow ? Int64.max : sum.partialValue
                         }
                         for folder in plan.groupedFileFolders {
-                            self.log("同名不同后缀文件已合并为文件夹：\(folder)；接收后在该文件夹内查看原文件 · 任务 \(attempt)")
+                            self.log(L10n.format("同名不同后缀文件已合并为文件夹：%@；接收后在该文件夹内查看原文件 · 任务 %@", String(describing: folder), String(describing: attempt)))
                         }
-                        let exclusions = plan.excludedItemCount > 0 ? " · 已排除 \(plan.excludedItemCount) 项（目录按 1 项计）" : ""
-                        self.log("准备完成：\(subject) · \(ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file))\(exclusions) · 任务 \(attempt)")
+                        let exclusions = plan.excludedItemCount > 0 ? L10n.format(" · 已排除 %@ 项（目录按 1 项计）", String(describing: plan.excludedItemCount)) : ""
+                        self.log(L10n.format("准备完成：%@ · %@%@ · 任务 %@", String(describing: subject), String(describing: ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)), String(describing: exclusions), String(describing: attempt)))
                     }
                 }
                 for (index, upload) in plan.files.enumerated() {
@@ -452,8 +454,8 @@ import Combine
                     DispatchQueue.main.sync {
                         MainActor.assumeIsolated {
                             guard self.activeTransferToken == token, !self.cancelling else { return }
-                            let stage = publishing ? "正在完成投递" : "开始上传"
-                            self.log("\(stage)：\(subject) · 第 \(index + 1)/\(plan.files.count) 项 · 任务 \(attempt)")
+                            let stage = publishing ? L10n.text("正在完成投递") : L10n.text("开始上传")
+                            self.log(L10n.format("%@：%@ · 第 %@/%@ 项 · 任务 %@", String(describing: stage), String(describing: subject), String(describing: index + 1), String(describing: plan.files.count), String(describing: attempt)))
                         }
                     }
                     try transfer.upload(file: upload.file, remoteName: upload.remoteName, settings: destination) { value in
@@ -482,7 +484,7 @@ import Combine
         transferSnapshot.totalBytes = values.totalBytes
         transferSnapshot.currentItem = itemName
         transferSnapshot.queuedCount = queued
-        transferSnapshot.detail = publishing ? "正在完成投递…" : "正在上传…"
+        transferSnapshot.detail = publishing ? L10n.text("正在完成投递…") : L10n.text("正在上传…")
     }
     func finish(_ entry: HistoryEntry, error: String?, token: UUID, wasCancelled: Bool = false) {
         guard running, activeTransferToken == token else { return }
@@ -492,39 +494,39 @@ import Combine
         activeTransferToken = nil
         transferSnapshot.phase = cancelled ? .cancelled : (succeeded ? .completed : .failed)
         transferSnapshot.queuedCount = queued
-        transferSnapshot.detail = cancelled ? "传输已取消" : (succeeded ? "FTP 上传完成" : "请在传输日志查看原因")
+        transferSnapshot.detail = cancelled ? L10n.text("传输已取消") : (succeeded ? L10n.text("FTP 上传完成") : L10n.text("请在传输日志查看原因"))
         if succeeded {
             transferSnapshot.fraction = 1
             transferSnapshot.uploadedBytes = transferSnapshot.totalBytes
         }
         let state = cancelled ? "已取消" : (succeeded ? "已发送" : "发送失败")
         updateStatus(entry.id, state)
-        let result = cancelled ? "传输已取消" : (succeeded ? "FTP 上传完成" : "发送失败：\(error ?? "未知错误")")
-        log("\(result) · \(transferSubject(entry)) · 任务 \(token.uuidString.prefix(8))",
+        let result = cancelled ? L10n.text("传输已取消") : (succeeded ? L10n.text("FTP 上传完成") : L10n.format("发送失败：%@", String(describing: error ?? L10n.text("未知错误"))))
+        log(L10n.format("%@ · %@ · 任务 %@", String(describing: result), String(describing: transferSubject(entry)), String(describing: token.uuidString.prefix(8))),
             level: cancelled ? .cancelled : (succeeded ? .success : .error))
         beginNext()
     }
     func cancelAll() {
         for task in tasks {
             updateStatus(task.0.id, "已取消")
-            log("等待任务已取消：\(transferSubject(task.0))", level: .cancelled)
+            log(L10n.format("等待任务已取消：%@", String(describing: transferSubject(task.0))), level: .cancelled)
         }
         tasks.removeAll(); queued = 0
         transferSnapshot.queuedCount = 0
         if running {
             cancelling = true
             transferSnapshot.phase = .cancelling
-            transferSnapshot.detail = "正在取消…"
+            transferSnapshot.detail = L10n.text("正在取消…")
         }
-        transfer.cancel(); log("已请求取消传输", level: .warning)
+        transfer.cancel(); log(L10n.text("已请求取消传输"), level: .warning)
     }
     func delete(_ entry: HistoryEntry) {
         entries.removeAll { $0.id == entry.id }; persist()
-        do { try repository.removeUnreferencedMedia(entries: entries) } catch { log("清理图片失败") }
+        do { try repository.removeUnreferencedMedia(entries: entries) } catch { log(L10n.text("清理图片失败")) }
     }
     func clearHistory() {
         entries.removeAll(); selected = nil; persist()
-        do { try repository.removeUnreferencedMedia(entries: []) } catch { log("清理图片失败") }
-        log("已清空本应用历史；源文件保留")
+        do { try repository.removeUnreferencedMedia(entries: []) } catch { log(L10n.text("清理图片失败")) }
+        log(L10n.text("已清空本应用历史；源文件保留"))
     }
 }

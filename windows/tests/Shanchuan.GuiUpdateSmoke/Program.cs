@@ -186,7 +186,8 @@ internal static class Program
         // RequestInstallAsync return after UIA observed an enabled value. Retry
         // the real footer action only while no modal confirmation is present.
         var (confirmation, invoke) = WaitForRealConfirmation(oldPid, oldWindow, managed, process);
-        var yes = WaitFor(() => Find(confirmation, AutomationElement.AutomationIdProperty, "6"), 15, "native confirmation Yes button ID 6");
+        var yes = WaitFor(() => Find(confirmation, AutomationElement.AutomationIdProperty, "ConfirmUpdateInstall") ??
+            Find(confirmation, AutomationElement.AutomationIdProperty, "6"), 15, "localized or historical native update confirmation button");
         Invoke(yes);
         Require(invoke is not null && invoke.Wait(TimeSpan.FromSeconds(30)), "Footer click did not return after confirmation.");
         Checks.Add("real-footer-and-native-yes-confirmation-invoked");

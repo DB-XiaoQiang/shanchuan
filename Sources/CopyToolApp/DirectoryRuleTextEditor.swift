@@ -1,3 +1,4 @@
+import CopyToolCore
 import AppKit
 import SwiftUI
 
@@ -59,7 +60,7 @@ struct DirectoryRuleTextEditor: NSViewRepresentable {
         editor.isGrammarCheckingEnabled = false
         editor.smartInsertDeleteEnabled = false
         editor.setAccessibilityIdentifier("directory-exclusion-editor-text")
-        editor.setAccessibilityLabel("目录排除规则文本，每行一条")
+        editor.setAccessibilityLabel(L10n.text("目录排除规则文本，每行一条"))
         editor.string = text
         editor.delegate = coordinator
         editor.didEndMarkedText = { [weak coordinator, weak editor] in

@@ -8,7 +8,7 @@ struct ShortcutSettingsView: View {
     @State private var autosaveStatus = ""
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Toggle("启用复制发送 / 粘贴快捷键", isOn: Binding(
+            Toggle(L10n.text("启用复制发送 / 粘贴快捷键"), isOn: Binding(
                 get: { draft.enabled },
                 set: { enabled in
                     guard draft.enabled != enabled else { return }
@@ -22,19 +22,19 @@ struct ShortcutSettingsView: View {
                     draft.enabled = enabled
                     saveDraft()
                 }))
-            ShortcutRecorderRow(title: "复制并发送到内网", binding: shortcutBinding(\.copy), recordingChanged: model.setShortcutRecording)
-            ShortcutRecorderRow(title: "粘贴到当前应用", binding: shortcutBinding(\.paste), recordingChanged: model.setShortcutRecording)
-            Text("复制发送快捷键先复制当前应用所选内容，再发送到已配置的内网 FTP；粘贴快捷键只在当前应用粘贴。")
+            ShortcutRecorderRow(title: L10n.text("复制并发送到内网"), binding: shortcutBinding(\.copy), recordingChanged: model.setShortcutRecording)
+            ShortcutRecorderRow(title: L10n.text("粘贴到当前应用"), binding: shortcutBinding(\.paste), recordingChanged: model.setShortcutRecording)
+            Text(L10n.text("复制发送快捷键先复制当前应用所选内容，再发送到已配置的内网 FTP；粘贴快捷键只在当前应用粘贴。"))
                 .font(.caption).foregroundStyle(.secondary)
-            Text("Command+C 只作普通复制，不记录到本应用，也不会上传。“开启历史记录”仅控制明确发送的内容是否保留记录。点击组合键可重新录制，修改后自动保存，按 Esc 取消；关闭主窗口后仍生效。")
+            Text(L10n.text("Command+C 只作普通复制，不记录到本应用，也不会上传。“开启历史记录”仅控制明确发送的内容是否保留记录。点击组合键可重新录制，修改后自动保存，按 Esc 取消；关闭主窗口后仍生效。"))
                 .font(.caption).foregroundStyle(.secondary)
-            Text(model.shortcutPermissionGranted ? "辅助功能权限已允许" : "全局操作需要在 macOS 辅助功能中允许“闪传”。")
+            Text(model.shortcutPermissionGranted ? L10n.text("辅助功能权限已允许") : L10n.text("全局操作需要在 macOS 辅助功能中允许“闪传”。"))
                 .font(.caption).foregroundStyle(model.shortcutPermissionGranted ? Color.secondary : Color.orange)
             HStack {
                 if !model.shortcutPermissionGranted {
-                    Button("打开辅助功能设置") { model.openShortcutAccessibilitySettings() }
+                    Button(L10n.text("打开辅助功能设置")) { model.openShortcutAccessibilitySettings() }
                 }
-                Button("恢复默认组合") {
+                Button(L10n.text("恢复默认组合")) {
                     var defaults = draft
                     defaults.copy = .init(keyCode: 8, modifiers: 6)
                     defaults.paste = .init(keyCode: 9, modifiers: 6)
@@ -43,8 +43,8 @@ struct ShortcutSettingsView: View {
                 }
                 Spacer()
             }
-            if let error = validationError { Text("未保存：" + error).font(.caption).foregroundStyle(.red) }
-            else if !model.shortcutSettingsError.isEmpty { Text("未保存：" + model.shortcutSettingsError).font(.caption).foregroundStyle(.red) }
+            if let error = validationError { Text(L10n.text("未保存：") + error).font(.caption).foregroundStyle(.red) }
+            else if !model.shortcutSettingsError.isEmpty { Text(L10n.text("未保存：") + model.shortcutSettingsError).font(.caption).foregroundStyle(.red) }
             else if !autosaveStatus.isEmpty { Text(autosaveStatus).font(.caption).foregroundStyle(.secondary) }
             if !model.shortcutStatus.isEmpty { Text(model.shortcutStatus).font(.caption).foregroundStyle(.secondary) }
         }
@@ -72,7 +72,7 @@ struct ShortcutSettingsView: View {
         autosaveStatus = ""
         guard !validateBindings || validationError == nil else { return }
         if draft == model.preferences.shortcuts || model.saveShortcutConfiguration(draft) {
-            autosaveStatus = "快捷键已保存"
+            autosaveStatus = L10n.text("快捷键已保存")
         }
     }
 }
@@ -83,7 +83,7 @@ private struct ShortcutRecorderRow: View {
     let recordingChanged: (Bool) -> Void
     var body: some View {
         HStack {
-            Text(title).frame(width: 140, alignment: .leading)
+            Text(title).frame(width: 190, alignment: .leading)
             ShortcutRecorder(binding: $binding, title: title, recordingChanged: recordingChanged)
                 .frame(width: 210, height: 28)
             Spacer()
@@ -102,8 +102,8 @@ private struct ShortcutRecorder: NSViewRepresentable {
     }
     func updateNSView(_ button: RecorderButton, context: Context) {
         button.displayTitle = binding.displayName
-        button.setAccessibilityLabel(title + "快捷键")
-        button.setAccessibilityHelp("点击后按新的组合键，按 Escape 取消录制")
+        button.setAccessibilityLabel(title + L10n.text("快捷键"))
+        button.setAccessibilityHelp(L10n.text("点击后按新的组合键，按 Escape 取消录制"))
         button.onChange = { binding = $0 }
         button.onRecordingChanged = recordingChanged
         if !button.recording { button.title = button.displayTitle }
@@ -127,7 +127,7 @@ private final class RecorderButton: NSButton {
     @objc private func beginRecording() {
         guard !recording else { endRecording(); return }
         window?.makeFirstResponder(self)
-        recording = true; title = "请按组合键…（Esc 取消）"
+        recording = true; title = L10n.text("请按组合键…（Esc 取消）")
         onRecordingChanged?(true)
         resignObserver = NotificationCenter.default.addObserver(forName: NSWindow.didResignKeyNotification, object: window, queue: .main) { [weak self] _ in
             self?.endRecording()

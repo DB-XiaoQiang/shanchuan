@@ -7,7 +7,7 @@ using Shanchuan.Windows.ViewModels;
 using DragEventArgs = System.Windows.DragEventArgs;
 using DataFormats = System.Windows.DataFormats;
 using DragDropEffects = System.Windows.DragDropEffects;
-using MessageBox = System.Windows.MessageBox;
+using MessageBox = Shanchuan.Windows.LocalizedMessageBox;
 
 namespace Shanchuan.Windows;
 
@@ -28,10 +28,10 @@ public partial class MainWindow : Window
 
     public bool AllowClose { get; set; }
 
-    private void NavigateHistory(object sender, RoutedEventArgs e) => ShowPage(HistoryPanel, "剪贴板记录");
-    private void NavigateLogs(object sender, RoutedEventArgs e) => ShowPage(LogsPanel, "传输日志");
-    private void NavigateHelp(object sender, RoutedEventArgs e) => ShowPage(HelpPanel, "使用说明");
-    private void NavigateSettings(object sender, RoutedEventArgs e) => ShowPage(SettingsPanel, "配置中心");
+    private void NavigateHistory(object sender, RoutedEventArgs e) => ShowPage(HistoryPanel, L.T("剪贴板记录"));
+    private void NavigateLogs(object sender, RoutedEventArgs e) => ShowPage(LogsPanel, L.T("传输日志"));
+    private void NavigateHelp(object sender, RoutedEventArgs e) => ShowPage(HelpPanel, L.T("使用说明"));
+    private void NavigateSettings(object sender, RoutedEventArgs e) => ShowPage(SettingsPanel, L.T("配置中心"));
 
     private void ShowPage(FrameworkElement selected, string title)
     {
@@ -51,7 +51,7 @@ public partial class MainWindow : Window
     {
         var dialog = new Microsoft.Win32.OpenFileDialog
         {
-            Title = "选择要发送的文件",
+            Title = L.T("选择要发送的文件"),
             Multiselect = true,
             CheckFileExists = true
         };
@@ -62,7 +62,7 @@ public partial class MainWindow : Window
     {
         using var dialog = new System.Windows.Forms.FolderBrowserDialog
         {
-            Description = "选择要发送的文件夹",
+            Description = L.T("选择要发送的文件夹"),
             UseDescriptionForTitle = true,
             ShowNewFolderButton = false
         };
@@ -85,14 +85,14 @@ public partial class MainWindow : Window
 
     private void ClearHistory(object sender, RoutedEventArgs e)
     {
-        if (MessageBox.Show("确定清空所有未在传输中的历史记录吗？此操作不会删除你主动发送的原始文件。",
-                "清空历史", MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes)
+        if (MessageBox.Show(L.T("确定清空所有未在传输中的历史记录吗？此操作不会删除你主动发送的原始文件。"),
+                L.T("清空历史"), MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes)
             _viewModel.ClearHistory();
     }
 
     private void ClearLogs(object sender, RoutedEventArgs e)
     {
-        if (MessageBox.Show("确定清空全部传输日志吗？", "清空日志",
+        if (MessageBox.Show(L.T("确定清空全部传输日志吗？"), L.T("清空日志"),
                 MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes)
             _viewModel.ClearLogs();
     }
@@ -115,7 +115,7 @@ public partial class MainWindow : Window
         var saved = _settingsPage?.TrySave() ?? _viewModel.SaveSettingsNow();
         if (!saved)
         {
-            ShowPage(SettingsPanel, "配置中心");
+            ShowPage(SettingsPanel, L.T("配置中心"));
             _settingsPage?.TrySave();
         }
         return saved;

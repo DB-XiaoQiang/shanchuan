@@ -10,13 +10,13 @@ public struct ReleaseVersion: Comparable, Equatable, Sendable {
     public let parts: [Int]
     public init(_ value: String) throws {
         let fields = value.split(separator: ".", omittingEmptySubsequences: false)
-        guard fields.count == 3 else { throw UpdateFailure.invalid("版本号须为三段数字。") }
+        guard fields.count == 3 else { throw UpdateFailure.invalid(L10n.text("版本号须为三段数字。")) }
         let values = fields.compactMap { field -> Int? in
             guard !field.isEmpty, field.utf8.allSatisfy({ (48...57).contains($0) }),
                   field.count == 1 || field.first != "0", let number = Int(field), number <= 999999 else { return nil }
             return number
         }
-        guard values.count == 3 else { throw UpdateFailure.invalid("版本号无效。") }
+        guard values.count == 3 else { throw UpdateFailure.invalid(L10n.text("版本号无效。")) }
         parts = values
     }
     public static func < (lhs: Self, rhs: Self) -> Bool { lhs.parts.lexicographicallyPrecedes(rhs.parts) }
@@ -60,16 +60,16 @@ public enum UpdateVerifier {
     public static func verify(manifest bytes: Data, signature: Data, publicKeyPEM: String,
                               expectedChannel: String = "stable") throws -> VerifiedRelease {
         guard !bytes.isEmpty, bytes.count <= maximumManifestBytes, signature.count <= 256 else {
-            throw UpdateFailure.invalid("更新清单或签名大小无效。")
+            throw UpdateFailure.invalid(L10n.text("更新清单或签名大小无效。"))
         }
         let key = try P256.Signing.PublicKey(pemRepresentation: publicKeyPEM)
         let signed = try P256.Signing.ECDSASignature(derRepresentation: signature)
-        guard key.isValidSignature(signed, for: bytes) else { throw UpdateFailure.invalid("更新清单签名不正确。") }
+        guard key.isValidSignature(signed, for: bytes) else { throw UpdateFailure.invalid(L10n.text("更新清单签名不正确。")) }
         let manifest = try JSONDecoder().decode(ReleaseManifest.self, from: bytes)
         guard ["stable", "test"].contains(expectedChannel),
               manifest.schemaVersion == 1, manifest.product == "Shanchuan", manifest.channel == expectedChannel,
               !manifest.assets.isEmpty, manifest.assets.count <= 32, manifest.releaseNotes.utf8.count <= 65536 else {
-            throw UpdateFailure.invalid("更新清单产品、通道或协议不匹配。")
+            throw UpdateFailure.invalid(L10n.text("更新清单产品、通道或协议不匹配。"))
         }
         _ = try ReleaseVersion(manifest.version)
         var names = Set<String>(); var kinds = Set<String>()
@@ -83,7 +83,7 @@ public enum UpdateVerifier {
                   asset.sha256.utf8.allSatisfy({ (48...57).contains($0) || (97...102).contains($0) }),
                   names.insert(asset.name.lowercased()).inserted,
                   kinds.insert("\(asset.platform)/\(asset.arch)/\(asset.kind)").inserted else {
-                throw UpdateFailure.invalid("更新附件名称、平台、大小或摘要无效。")
+                throw UpdateFailure.invalid(L10n.text("更新附件名称、平台、大小或摘要无效。"))
             }
         }
         return VerifiedRelease(manifest: manifest, bytes: bytes, signature: signature)
@@ -97,19 +97,19 @@ public enum UpdateVerifier {
         let attributes = try FileManager.default.attributesOfItem(atPath: file.path)
         guard (attributes[.type] as? FileAttributeType) == .typeRegular,
               (attributes[.size] as? NSNumber)?.int64Value == asset.size else {
-            throw UpdateFailure.invalid("更新附件大小不匹配：\(asset.name)")
+            throw UpdateFailure.invalid(L10n.format("更新附件大小不匹配：%@", String(describing: asset.name)))
         }
         let handle = try FileHandle(forReadingFrom: file); defer { try? handle.close() }
         var digest = SHA256()
         while let bytes = try handle.read(upToCount: 1024 * 1024), !bytes.isEmpty { digest.update(data: bytes) }
         let actual = digest.finalize().map { String(format: "%02x", $0) }.joined()
-        guard actual == asset.sha256 else { throw UpdateFailure.invalid("更新附件摘要不匹配：\(asset.name)") }
+        guard actual == asset.sha256 else { throw UpdateFailure.invalid(L10n.format("更新附件摘要不匹配：%@", String(describing: asset.name))) }
     }
     public static func verifyWindowsFeed(_ release: VerifiedRelease, directory: URL) throws {
         guard let full = release.manifest.asset(platform: "windows", arch: "x64", kind: "velopack-full"),
               let feed = release.manifest.asset(platform: "windows", arch: "x64", kind: "velopack-feed"),
               feed.name == "releases.win-x64.json" else {
-            throw UpdateFailure.invalid("发行版缺少 Windows 完整更新包。")
+            throw UpdateFailure.invalid(L10n.text("发行版缺少 Windows 完整更新包。"))
         }
         try verify(file: directory.appendingPathComponent(full.name), asset: full)
         try verify(file: directory.appendingPathComponent(feed.name), asset: feed)
@@ -122,7 +122,7 @@ public enum UpdateVerifier {
               target["Type"] as? String == "Full",
               (target["Size"] as? NSNumber)?.int64Value == full.size,
               (target["SHA256"] as? String)?.lowercased() == full.sha256 else {
-            throw UpdateFailure.invalid("Windows 更新索引与已签名发行清单不一致。")
+            throw UpdateFailure.invalid(L10n.text("Windows 更新索引与已签名发行清单不一致。"))
         }
     }
 }

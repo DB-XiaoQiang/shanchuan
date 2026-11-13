@@ -56,5 +56,5 @@ public sealed partial class AppViewModel
     }
 
     public void ReportUpdateMessage(string message, bool error = false) => OnUi(() =>
-        AddLog(error ? TransferLogLevel.Warning : TransferLogLevel.Info, "应用更新：" + Sanitize(message)));
+        AddLog(error ? TransferLogLevel.Warning : TransferLogLevel.Info, L.T("应用更新：") + Sanitize(message)));
 }

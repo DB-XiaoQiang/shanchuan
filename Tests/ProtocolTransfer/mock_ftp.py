@@ -100,7 +100,7 @@ with LoopbackServer(("127.0.0.1", 0), FTP) as server, tempfile.TemporaryDirector
     thread.start()
     root = pathlib.Path(__file__).resolve().parents[2]
     executable = str(pathlib.Path(temp) / "protocol-transfer-test")
-    sources = [root / "Sources/CopyToolCore" / name for name in ("KeyboardShortcutConfiguration.swift", "History.swift", "DirectoryExclusions.swift", "FTPTransfer.swift", "TransferProtocol.swift")]
+    sources = [root / "Sources/CopyToolCore" / name for name in ("Localization.swift", "KeyboardShortcutConfiguration.swift", "History.swift", "DirectoryExclusions.swift", "FTPTransfer.swift", "TransferProtocol.swift")]
     try:
         subprocess.run(["swiftc", "-swift-version", "6", *(str(source) for source in sources), str(root / "Tests/ProtocolTransfer/main.swift"), "-o", executable], check=True, timeout=60)
         subprocess.run([executable, str(server.server_address[1])], check=True, timeout=30)

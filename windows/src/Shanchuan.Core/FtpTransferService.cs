@@ -23,7 +23,7 @@ public sealed class FtpTransferService
         }
         catch (OperationCanceledException error) when (!cancellationToken.IsCancellationRequested)
         {
-            throw new TimeoutException("连接测试超过 10 秒，请检查服务器地址、端口和网络。", error);
+            throw new TimeoutException(L.T("连接测试超过 10 秒，请检查服务器地址、端口和网络。"), error);
         }
     }
 
@@ -48,7 +48,7 @@ public sealed class FtpTransferService
             var result = await client.UploadFile(file.LocalPath, remotePath, FtpRemoteExists.Overwrite,
                 true, FtpVerify.None, fileProgress, cancellationToken).ConfigureAwait(false);
             if (result != FtpStatus.Success)
-                throw new IOException($"FTP 上传未完成：{file.RemoteName}（{result}）。");
+                throw new IOException(L.F($"FTP 上传未完成：{file.RemoteName}（{result}）。"));
             progress?.Report(tracker.Update(index, 1));
         }
     }
@@ -69,6 +69,6 @@ public sealed class FtpTransferService
     private static void Validate(AppSettings settings, string password)
     {
         if (settings.ValidateForTransfer() is { } error) throw new InvalidDataException(error);
-        if (password.Any(char.IsControl)) throw new InvalidDataException("FTP 密码不能包含控制字符。");
+        if (password.Any(char.IsControl)) throw new InvalidDataException(L.T("FTP 密码不能包含控制字符。"));
     }
 }

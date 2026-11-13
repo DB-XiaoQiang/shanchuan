@@ -59,12 +59,12 @@ final class TransferProgressWindowController {
         cancelTerminalHide()
         let id = UUID()
         updatePreview(id: id, phase: .preparing, fraction: nil, uploadedBytes: 0,
-                      detail: "预览 · 正在准备示例文件", reposition: true)
+                      detail: L10n.text("预览 · 正在准备示例文件"), reposition: true)
         previewTask = Task { @MainActor [weak self] in
             let steps: [(UInt64, Double?, Int64, String)] = [
-                (800_000_000, 0.26, 2_181_038, "预览 · 正在上传示例文件"),
-                (900_000_000, 0.61, 5_117_051, "预览 · 正在上传示例文件"),
-                (900_000_000, 0.94, 7_885_292, "预览 · 正在上传示例文件")
+                (800_000_000, 0.26, 2_181_038, L10n.text("预览 · 正在上传示例文件")),
+                (900_000_000, 0.61, 5_117_051, L10n.text("预览 · 正在上传示例文件")),
+                (900_000_000, 0.94, 7_885_292, L10n.text("预览 · 正在上传示例文件"))
             ]
             for (delay, fraction, uploaded, detail) in steps {
                 do { try await Task.sleep(nanoseconds: delay) } catch { return }
@@ -77,12 +77,12 @@ final class TransferProgressWindowController {
             guard let self, self.previewSnapshot?.id == id,
                   self.model?.transferSnapshot.isActive != true else { return }
             self.updatePreview(id: id, phase: .publishing, fraction: 0.99,
-                               uploadedBytes: 8_388_608, detail: "预览 · 正在完成投递")
+                               uploadedBytes: 8_388_608, detail: L10n.text("预览 · 正在完成投递"))
             do { try await Task.sleep(nanoseconds: 650_000_000) } catch { return }
             guard self.previewSnapshot?.id == id,
                   self.model?.transferSnapshot.isActive != true else { return }
             self.updatePreview(id: id, phase: .completed, fraction: 1,
-                               uploadedBytes: 8_388_608, detail: "预览 · 示例已完成，没有发送任何文件")
+                               uploadedBytes: 8_388_608, detail: L10n.text("预览 · 示例已完成，没有发送任何文件"))
             do { try await Task.sleep(nanoseconds: 1_100_000_000) } catch { return }
             guard self.previewSnapshot?.id == id else { return }
             self.endPreview(hidePanel: true)
@@ -153,7 +153,7 @@ final class TransferProgressWindowController {
                 styleMask: [.borderless, .nonactivatingPanel],
                 backing: .buffered, defer: false
             )
-            panel.title = "传输进度"
+            panel.title = L10n.text("传输进度")
             panel.isReleasedWhenClosed = false
             panel.isRestorable = false
             panel.isFloatingPanel = true
@@ -307,9 +307,9 @@ private struct TransferProgressCardView: View {
                     .font(.system(size: 22, weight: .medium))
                     .foregroundStyle(phaseColor)
                     .frame(width: 28, height: 28)
-                Text("传输进度").font(.system(size: 13, weight: .semibold))
+                Text(L10n.text("传输进度")).font(.system(size: 13, weight: .semibold))
                 if isPreview {
-                    Text("预览")
+                    Text(L10n.text("预览"))
                         .font(.system(size: 10, weight: .medium))
                         .padding(.horizontal, 6).padding(.vertical, 3)
                         .background(.quaternary, in: Capsule())
@@ -323,15 +323,15 @@ private struct TransferProgressCardView: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .help(isPreview ? "关闭预览" : "关闭卡片，传输继续")
-                .accessibilityLabel(isPreview ? "关闭预览" : "关闭进度卡片")
+                .help(isPreview ? L10n.text("关闭预览") : L10n.text("关闭卡片，传输继续"))
+                .accessibilityLabel(isPreview ? L10n.text("关闭预览") : L10n.text("关闭进度卡片"))
             }
 
             VStack(alignment: .leading, spacing: 7) {
                 Text(itemName)
                     .font(.system(size: 14, weight: .medium))
                     .lineLimit(1).truncationMode(.middle)
-                    .help(privacy ? "内容已隐藏" : itemName)
+                    .help(privacy ? L10n.text("内容已隐藏") : itemName)
                 HStack {
                     Text(phaseTitle).foregroundStyle(phaseColor)
                     Spacer()
@@ -346,12 +346,12 @@ private struct TransferProgressCardView: View {
                     }
                 }
                 .tint(phaseColor)
-                .accessibilityLabel("传输进度")
+                .accessibilityLabel(L10n.text("传输进度"))
                 .accessibilityValue(progressLabel)
                 Text(byteLabel)
                     .font(.system(size: 11)).monospacedDigit()
                     .foregroundStyle(.secondary)
-                Text(privacy ? "隐私模式已隐藏文件名称和传输详情" : snapshot.detail)
+                Text(privacy ? L10n.text("隐私模式已隐藏文件名称和传输详情") : snapshot.detail)
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
@@ -365,7 +365,7 @@ private struct TransferProgressCardView: View {
                     .font(.system(size: 11)).foregroundStyle(.secondary)
                 Spacer()
                 if isPreview || snapshot.isActive {
-                    Button(isPreview ? "结束预览" : snapshot.phase == .cancelling ? "取消中…" : "取消传输", action: cancel)
+                    Button(isPreview ? L10n.text("结束预览") : snapshot.phase == .cancelling ? L10n.text("取消中…") : L10n.text("取消传输"), action: cancel)
                         .font(.system(size: 11, weight: .medium))
                         .buttonStyle(.bordered)
                         .controlSize(.small)
@@ -385,10 +385,10 @@ private struct TransferProgressCardView: View {
     }
 
     private var itemName: String {
-        guard !privacy else { return "内容已隐藏" }
+        guard !privacy else { return L10n.text("内容已隐藏") }
         let name = snapshot.currentItem.isEmpty ? snapshot.title : snapshot.currentItem
         let filename = (name as NSString).lastPathComponent
-        return filename.isEmpty ? "传输内容" : filename
+        return filename.isEmpty ? L10n.text("传输内容") : filename
     }
 
     private var fraction: Double? {
@@ -400,9 +400,9 @@ private struct TransferProgressCardView: View {
     private var progressLabel: String {
         if let fraction { return "\(Int((fraction * 100).rounded(.down)))%" }
         switch snapshot.phase {
-        case .preparing: return "准备中"
-        case .publishing: return "确认中"
-        case .cancelling: return "取消中"
+        case .preparing: return L10n.text("准备中")
+        case .publishing: return L10n.text("确认中")
+        case .cancelling: return L10n.text("取消中")
         default: return "—"
         }
     }
@@ -414,24 +414,24 @@ private struct TransferProgressCardView: View {
         if total > 0 {
             return sent + " / " + ByteCountFormatter.string(fromByteCount: total, countStyle: .file)
         }
-        if uploaded > 0 { return "已上传 " + sent }
-        return snapshot.phase == .preparing ? "正在统计文件大小" : "暂无字节统计"
+        if uploaded > 0 { return L10n.text("已上传 ") + sent }
+        return snapshot.phase == .preparing ? L10n.text("正在统计文件大小") : L10n.text("暂无字节统计")
     }
 
     private var queueLabel: String {
-        snapshot.queuedCount > 0 ? "等待 \(snapshot.queuedCount) 项" : "没有等待任务"
+        snapshot.queuedCount > 0 ? L10n.format("等待 %@ 项", String(describing: snapshot.queuedCount)) : L10n.text("没有等待任务")
     }
 
     private var phaseTitle: String {
         switch snapshot.phase {
-        case .idle: return "等待发送"
-        case .preparing: return "准备文件"
-        case .uploading: return "上传中"
-        case .publishing: return "正在完成"
-        case .cancelling: return "正在取消"
-        case .completed: return "发送完成"
-        case .failed: return "发送失败"
-        case .cancelled: return "已取消"
+        case .idle: return L10n.text("等待发送")
+        case .preparing: return L10n.text("准备文件")
+        case .uploading: return L10n.text("上传中")
+        case .publishing: return L10n.text("正在完成")
+        case .cancelling: return L10n.text("正在取消")
+        case .completed: return L10n.text("发送完成")
+        case .failed: return L10n.text("发送失败")
+        case .cancelled: return L10n.text("已取消")
         }
     }
 

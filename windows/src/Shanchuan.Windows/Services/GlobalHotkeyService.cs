@@ -21,13 +21,13 @@ public sealed class GlobalHotkeyService : IDisposable
     public void Initialize(IntPtr handle)
     {
         _handle = handle;
-        _source = HwndSource.FromHwnd(handle) ?? throw new InvalidOperationException("无法初始化 Windows 热键窗口。");
+        _source = HwndSource.FromHwnd(handle) ?? throw new InvalidOperationException(L.T("无法初始化 Windows 热键窗口。"));
         _source.AddHook(WindowProc);
     }
 
     public void Update(ShortcutOptions options)
     {
-        if (_handle == IntPtr.Zero) throw new InvalidOperationException("全局热键窗口尚未初始化，请重新启动闪传。");
+        if (_handle == IntPtr.Zero) throw new InvalidOperationException(L.T("全局热键窗口尚未初始化，请重新启动闪传。"));
         Unregister();
         _options = options.Clone();
         if (!options.Enabled) return;
@@ -43,7 +43,7 @@ public sealed class GlobalHotkeyService : IDisposable
     private void Register(int id, ShortcutBinding binding)
     {
         if (!RegisterHotKey(_handle, id, (uint)binding.Modifiers | ModNoRepeat, binding.VirtualKey))
-            throw new Win32Exception(Marshal.GetLastWin32Error(), $"无法注册全局快捷键 {binding.DisplayName}，可能被其他程序占用。");
+            throw new Win32Exception(Marshal.GetLastWin32Error(), L.F($"无法注册全局快捷键 {binding.DisplayName}，可能被其他程序占用。"));
     }
 
     private IntPtr WindowProc(IntPtr hwnd, int message, IntPtr wParam, IntPtr lParam, ref bool handled)

@@ -57,7 +57,7 @@ public sealed class FtpUpdateTransport(Func<bool>? isBusy = null, SemaphoreSlim?
                         UpdateManifestVerifier.MaxManifestBytes, settings, password, token);
                     var signature = await DownloadBytesAsync(directory + "/" + UpdateManifestVerifier.SignatureName, 256, settings, password, token);
                     var manifest = verifier.Verify(manifestBytes, signature);
-                    if (manifest.Version != version) throw new InvalidDataException("更新目录版本与签名清单不一致。");
+                    if (manifest.Version != version) throw new InvalidDataException(L.T("更新目录版本与签名清单不一致。"));
                     var verified = await cache.ImportAsync(manifestBytes, signature, (asset, destination, ct) =>
                         DownloadFileAsync(directory + "/" + asset.Name, destination, asset.Size, settings, password, ct), token);
                     return verified;
@@ -66,7 +66,7 @@ public sealed class FtpUpdateTransport(Func<bool>? isBusy = null, SemaphoreSlim?
                 { lastFailure = error; }
             }
         }
-        if (lastFailure is not null) throw new InvalidDataException("内网更新包暂不可用，未安装任何内容。", lastFailure);
+        if (lastFailure is not null) throw new InvalidDataException(L.T("内网更新包暂不可用，未安装任何内容。"), lastFailure);
         return null;
     }
 
@@ -80,7 +80,7 @@ public sealed class FtpUpdateTransport(Func<bool>? isBusy = null, SemaphoreSlim?
             try
             {
                 var list = await client.GetNameListing(remote, token);
-                if (list.Length > 4096) throw new InvalidDataException("更新目录条目过多。");
+                if (list.Length > 4096) throw new InvalidDataException(L.T("更新目录条目过多。"));
                 return list.Select(value => ChildName(value, remote)).Where(x => x is not null).Cast<string>().Distinct(StringComparer.Ordinal).ToArray();
             }
             catch (FtpCommandException error) when (error.CompletionCode == "550") { return []; }
@@ -96,7 +96,7 @@ public sealed class FtpUpdateTransport(Func<bool>? isBusy = null, SemaphoreSlim?
             using var client = CreateClient(settings, password);
             await client.Connect(token);
             var status = await client.UploadFile(file, remote, FtpRemoteExists.NoCheck, true, FtpVerify.None, null, token);
-            if (status != FtpStatus.Success) throw new IOException("更新包 FTP 上传未完成。");
+            if (status != FtpStatus.Success) throw new IOException(L.T("更新包 FTP 上传未完成。"));
         }
         finally { _gate.Release(); }
     }
@@ -113,7 +113,7 @@ public sealed class FtpUpdateTransport(Func<bool>? isBusy = null, SemaphoreSlim?
                 await GitHubUpdateSource.CopyBoundedAsync(input, output, maximum, token);
             // Raw FTP data streams require consuming the transfer-complete reply.
             var reply = await client.GetReply(token);
-            if (!reply.Success) throw new IOException("FTP 更新下载未完成。");
+            if (!reply.Success) throw new IOException(L.T("FTP 更新下载未完成。"));
         }
         finally { _gate.Release(); }
     }
@@ -165,6 +165,6 @@ public sealed class FtpUpdateTransport(Func<bool>? isBusy = null, SemaphoreSlim?
     private static void Validate(AppSettings settings, string password)
     {
         if (settings.ValidateForTransfer() is { } error) throw new InvalidDataException(error);
-        if (password.Any(char.IsControl)) throw new InvalidDataException("FTP 密码不能包含控制字符。");
+        if (password.Any(char.IsControl)) throw new InvalidDataException(L.T("FTP 密码不能包含控制字符。"));
     }
 }

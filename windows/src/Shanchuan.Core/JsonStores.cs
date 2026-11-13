@@ -78,12 +78,12 @@ internal static class JsonFileStore
     public static T Read<T>(string path)
     {
         var json = File.ReadAllText(path);
-        return JsonSerializer.Deserialize<T>(json, Options) ?? throw new InvalidDataException($"无法读取 {Path.GetFileName(path)}。");
+        return JsonSerializer.Deserialize<T>(json, Options) ?? throw new InvalidDataException(L.F($"无法读取 {Path.GetFileName(path)}。"));
     }
 
     public static void Write<T>(string path, T value)
     {
-        var directory = Path.GetDirectoryName(path) ?? throw new InvalidOperationException("数据文件路径无效。");
+        var directory = Path.GetDirectoryName(path) ?? throw new InvalidOperationException(L.T("数据文件路径无效。"));
         Directory.CreateDirectory(directory);
         var temporary = Path.Combine(directory, $".{Guid.NewGuid():N}.tmp");
         try
