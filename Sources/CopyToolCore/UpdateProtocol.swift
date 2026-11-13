@@ -57,7 +57,8 @@ public enum UpdateVerifier {
     public static let maximumManifestBytes = 256 * 1024
     public static let maximumAssetBytes: Int64 = 2 * 1024 * 1024 * 1024
     public static func sha256(_ bytes: Data) -> String { SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined() }
-    public static func verify(manifest bytes: Data, signature: Data, publicKeyPEM: String) throws -> VerifiedRelease {
+    public static func verify(manifest bytes: Data, signature: Data, publicKeyPEM: String,
+                              expectedChannel: String = "stable") throws -> VerifiedRelease {
         guard !bytes.isEmpty, bytes.count <= maximumManifestBytes, signature.count <= 256 else {
             throw UpdateFailure.invalid("更新清单或签名大小无效。")
         }
@@ -65,7 +66,8 @@ public enum UpdateVerifier {
         let signed = try P256.Signing.ECDSASignature(derRepresentation: signature)
         guard key.isValidSignature(signed, for: bytes) else { throw UpdateFailure.invalid("更新清单签名不正确。") }
         let manifest = try JSONDecoder().decode(ReleaseManifest.self, from: bytes)
-        guard manifest.schemaVersion == 1, manifest.product == "Shanchuan", manifest.channel == "stable",
+        guard ["stable", "test"].contains(expectedChannel),
+              manifest.schemaVersion == 1, manifest.product == "Shanchuan", manifest.channel == expectedChannel,
               !manifest.assets.isEmpty, manifest.assets.count <= 32, manifest.releaseNotes.utf8.count <= 65536 else {
             throw UpdateFailure.invalid("更新清单产品、通道或协议不匹配。")
         }

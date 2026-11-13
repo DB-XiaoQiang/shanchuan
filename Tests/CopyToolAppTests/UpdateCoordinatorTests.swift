@@ -15,6 +15,7 @@ private actor UpdateFixtureNetwork {
         return response
     }
     func count() -> Int { requests.count }
+    func urls() -> [String] { requests }
 }
 
 private actor UpdateFixtureHTTPFailureNetwork {
@@ -54,7 +55,9 @@ final class UpdateCoordinatorTests: XCTestCase {
         let key: String
         let responses: [String: Data]
     }
-    private func fixture(version: String = "0.4.0", prerelease: Bool = false, corruptPackage: Bool = false) throws -> Fixture {
+    private func fixture(version: String = "0.4.0", prerelease: Bool = false, corruptPackage: Bool = false,
+                         manifestChannel: String = "stable", tagPrefix: String = "v", macOnly: Bool = false,
+                         draft: Bool = false) throws -> Fixture {
         let signingKey = P256.Signing.PrivateKey()
         let package = Data("windows package".utf8), zip = Data("macos synthetic zip".utf8), appcast = Data("<rss/>".utf8)
         let fullName = "Shanchuan-\(version)-win-x64-full.nupkg"
@@ -63,18 +66,20 @@ final class UpdateCoordinatorTests: XCTestCase {
         func asset(_ platform: String, _ arch: String, _ kind: String, _ name: String, _ bytes: Data) -> [String: Any] {
             ["platform": platform, "arch": arch, "kind": kind, "name": name, "size": bytes.count, "sha256": UpdateVerifier.sha256(bytes)]
         }
+        let macAssets = [asset("macos", "arm64", "sparkle-zip", "Shanchuan-macos-arm64.zip", zip),
+                         asset("macos", "arm64", "appcast", "appcast.xml", appcast)]
+        let assets = macOnly ? macAssets : [asset("windows", "x64", "velopack-full", fullName, package),
+                                          asset("windows", "x64", "velopack-feed", "releases.win-x64.json", feed)] + macAssets
         let manifest = try JSONSerialization.data(withJSONObject: [
-            "schemaVersion": 1, "product": "Shanchuan", "channel": "stable", "version": version, "releaseNotes": "合成更新说明",
-            "assets": [asset("windows", "x64", "velopack-full", fullName, package),
-                       asset("windows", "x64", "velopack-feed", "releases.win-x64.json", feed),
-                       asset("macos", "arm64", "sparkle-zip", "Shanchuan-macos-arm64.zip", zip),
-                       asset("macos", "arm64", "appcast", "appcast.xml", appcast)]
+            "schemaVersion": 1, "product": "Shanchuan", "channel": manifestChannel, "version": version, "releaseNotes": "合成更新说明",
+            "assets": assets
         ], options: [.sortedKeys])
+        let metadata = try JSONSerialization.data(withJSONObject: ["tag_name": tagPrefix + version, "draft": draft, "prerelease": prerelease])
         return Fixture(key: signingKey.publicKey.pemRepresentation, responses: [
-            "latest": try JSONSerialization.data(withJSONObject: ["tag_name": "v" + version, "draft": false, "prerelease": prerelease]),
+            "latest": metadata, "update-test-v0.1.4": metadata,
             "update-manifest.json": manifest, "update-manifest.sig": try signingKey.signature(for: manifest).derRepresentation,
             fullName: corruptPackage ? Data("CORRUPTED".utf8) : package,
-            "releases.win-x64.json": feed, "Shanchuan-macos-arm64.zip": zip, "appcast.xml": appcast
+            "releases.win-x64.json": feed, "Shanchuan-macos-arm64.zip": macOnly && corruptPackage ? Data("CORRUPTED".utf8) : zip, "appcast.xml": appcast
         ])
     }
     private func temporaryRoot() throws -> URL {
@@ -302,5 +307,110 @@ final class UpdateCoordinatorTests: XCTestCase {
         _ = await (first, second)
         let count = await network.count()
         XCTAssertEqual(count, 7, "一次metadata、清单、签名和四个附件，不得并发重复下载")
+    }
+
+    @MainActor func testIsolatedTestDiscoversMacOnlyReleaseWithoutFTPOrPrematureInstallation() async throws {
+        let sample = try fixture(version: "0.1.4", prerelease: true, manifestChannel: "test", tagPrefix: "update-test-v", macOnly: true)
+        let network = UpdateFixtureNetwork(responses: sample.responses), relay = UpdateFixtureRelay()
+        var ftpReads = 0, installs = 0
+        let coordinator = UpdateCoordinator(root: try temporaryRoot(), currentVersion: "0.1.3", publicKey: sample.key,
+            channel: .isolatedTest(), dataLoader: { try await network.load($0, maximum: $1) },
+            upload: { try await relay.upload($0, name: $1, settings: $2) })
+        coordinator.ftpSettings = { ftpReads += 1; return FTPSettings(host: "127.0.0.1", username: "synthetic", directory: "/share") }
+        coordinator.install = { _ in installs += 1; return true }
+        await coordinator.checkNow()
+        XCTAssertEqual(coordinator.candidateVersion, "0.1.4")
+        XCTAssertTrue(coordinator.canInstall)
+        XCTAssertFalse(coordinator.waitingForInstallation)
+        XCTAssertFalse(coordinator.isRelaying)
+        XCTAssertTrue(coordinator.relayStatus.contains("不转发 FTP"))
+        XCTAssertEqual(installs, 0)
+        let urls = await network.urls()
+        XCTAssertEqual(urls.count, 5, "测试通道只下载metadata、签名清单和两个Mac附件")
+        XCTAssertEqual(urls.first, "https://api.github.com/repos/DB-XiaoQiang/shanchuan/releases/tags/update-test-v0.1.4")
+        XCTAssertTrue(urls.dropFirst().allSatisfy { $0.hasPrefix("https://github.com/DB-XiaoQiang/shanchuan/releases/download/update-test-v0.1.4/") })
+        XCTAssertFalse(urls.contains { $0.contains("win-x64") })
+        coordinator.start()
+        coordinator.tick()
+        try await Task.sleep(nanoseconds: 40_000_000)
+        XCTAssertEqual(ftpReads, 0, "测试通道连FTP配置凭据回调也不能读取")
+        let uploaded = await relay.snapshot()
+        XCTAssertTrue(uploaded.0.isEmpty)
+    }
+
+    @MainActor func testIsolatedTestMacOnlyCacheRestoresWithoutWindowsFeedOrNetwork() async throws {
+        let sample = try fixture(version: "0.1.4", prerelease: true, manifestChannel: "test", tagPrefix: "update-test-v", macOnly: true)
+        let root = try temporaryRoot(), network = UpdateFixtureNetwork(responses: sample.responses)
+        var first: UpdateCoordinator? = UpdateCoordinator(root: root, currentVersion: "0.1.3", publicKey: sample.key,
+            channel: .isolatedTest(), dataLoader: { try await network.load($0, maximum: $1) })
+        await first!.checkNow()
+        XCTAssertEqual(first!.candidateVersion, "0.1.4")
+        first = nil
+        let restored = UpdateCoordinator(root: root, currentVersion: "0.1.3", publicKey: sample.key,
+            channel: .isolatedTest(), dataLoader: { _, _ in XCTFail("缓存恢复不应再次查询网络"); return Data() })
+        restored.ftpSettings = { XCTFail("缓存恢复不能读取FTP设置"); return nil }
+        restored.start()
+        XCTAssertEqual(restored.candidateVersion, "0.1.4")
+        XCTAssertTrue(restored.canInstall)
+        try await Task.sleep(nanoseconds: 30_000_000)
+
+        let production = UpdateCoordinator(root: root, currentVersion: "0.1.3", publicKey: sample.key,
+            dataLoader: { _, _ in XCTFail("正式通道不能把测试缓存变成请求"); return Data() })
+        production.start()
+        XCTAssertNil(production.candidateVersion, "即使公钥误配一致，正式通道也必须拒绝test清单")
+        XCTAssertFalse(production.canInstall)
+    }
+
+    @MainActor func testTestChannelRejectsWrongMetadataChannelTamperingAndDowngrade() async throws {
+        let samples = [
+            try fixture(version: "0.1.4", prerelease: false, manifestChannel: "test", tagPrefix: "update-test-v", macOnly: true),
+            try fixture(version: "0.1.4", prerelease: true, manifestChannel: "test", tagPrefix: "v", macOnly: true),
+            try fixture(version: "0.1.4", prerelease: true, manifestChannel: "test", tagPrefix: "update-test-v", macOnly: true, draft: true),
+            try fixture(version: "0.1.4", prerelease: true, manifestChannel: "stable", tagPrefix: "update-test-v", macOnly: true),
+            try fixture(version: "0.1.4", prerelease: true, corruptPackage: true, manifestChannel: "test", tagPrefix: "update-test-v", macOnly: true)
+        ]
+        for sample in samples {
+            let network = UpdateFixtureNetwork(responses: sample.responses)
+            let coordinator = UpdateCoordinator(root: try temporaryRoot(), currentVersion: "0.1.3", publicKey: sample.key,
+                channel: .isolatedTest(), dataLoader: { try await network.load($0, maximum: $1) })
+            coordinator.ftpSettings = { XCTFail("拒绝的测试发行版不能读取FTP设置"); return nil }
+            await coordinator.checkNow()
+            XCTAssertNil(coordinator.candidateVersion)
+            XCTAssertFalse(coordinator.canInstall)
+            XCTAssertTrue(coordinator.status.contains("失败"))
+        }
+        let sample = try fixture(version: "0.1.4", prerelease: true, manifestChannel: "test", tagPrefix: "update-test-v", macOnly: true)
+        let network = UpdateFixtureNetwork(responses: sample.responses)
+        let newer = UpdateCoordinator(root: try temporaryRoot(), currentVersion: "0.1.5", publicKey: sample.key,
+            channel: .isolatedTest(), dataLoader: { try await network.load($0, maximum: $1) })
+        await newer.checkNow()
+        XCTAssertFalse(newer.canInstall)
+        XCTAssertTrue(newer.status.contains("拒绝低于当前安装版本"))
+        let requests = await network.count()
+        XCTAssertEqual(requests, 1)
+    }
+
+    @MainActor func testProductionAndTestManifestChannelsAndKeysAreMutuallyRejected() throws {
+        let stable = try fixture(), test = try fixture(version: "0.1.4", prerelease: true, manifestChannel: "test", tagPrefix: "update-test-v", macOnly: true)
+        let bytes = try XCTUnwrap(test.responses["update-manifest.json"]), signature = try XCTUnwrap(test.responses["update-manifest.sig"])
+        XCTAssertThrowsError(try UpdateVerifier.verify(manifest: bytes, signature: signature, publicKeyPEM: test.key))
+        XCTAssertThrowsError(try UpdateVerifier.verify(manifest: bytes, signature: signature, publicKeyPEM: stable.key, expectedChannel: "test"))
+        XCTAssertThrowsError(try UpdateVerifier.verify(manifest: bytes, signature: signature, publicKeyPEM: test.key, expectedChannel: "preview"))
+        XCTAssertNoThrow(try UpdateVerifier.verify(manifest: bytes, signature: signature, publicKeyPEM: test.key, expectedChannel: "test"))
+        XCTAssertThrowsError(try UpdateVerifier.verify(manifest: XCTUnwrap(stable.responses["update-manifest.json"]),
+            signature: XCTUnwrap(stable.responses["update-manifest.sig"]), publicKeyPEM: stable.key, expectedChannel: "test"))
+        XCTAssertEqual(UpdateChannel.production.sparkleFeedURL(version: "0.1.4"), "https://github.com/DB-XiaoQiang/shanchuan/releases/download/v0.1.4/appcast.xml")
+        XCTAssertEqual(UpdateChannel.isolatedTest().sparkleFeedURL(version: "0.1.4"), "https://github.com/DB-XiaoQiang/shanchuan/releases/download/update-test-v0.1.4/appcast.xml")
+    }
+
+    @MainActor func testInvalidTestChannelIsDisabledWithoutFallingBackToProduction() async throws {
+        let sample = try fixture()
+        let coordinator = UpdateCoordinator(root: try temporaryRoot(), currentVersion: "0.1.3", publicKey: sample.key,
+            channel: .isolatedTest(targetVersion: "../../latest"), dataLoader: { _, _ in XCTFail("无效测试配置不能访问任何网络"); return Data() })
+        coordinator.start()
+        await coordinator.checkNow()
+        XCTAssertFalse(coordinator.canCheck)
+        XCTAssertFalse(coordinator.canInstall)
+        XCTAssertTrue(coordinator.status.contains("测试更新目标配置无效"))
     }
 }

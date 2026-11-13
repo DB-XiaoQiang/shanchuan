@@ -22,9 +22,11 @@ struct RootView: View {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 6) {
                     AppLogo(size: 38)
-                    Text("闪传").font(.headline)
+                    Text(model.runtimeProfile.applicationName).font(.headline)
                 }
-                Text("本机历史 · 快捷键投递").font(.caption).foregroundStyle(.secondary)
+                Text(model.runtimeProfile.isUpdateTest ? "独立测试通道 · 不连接 FTP" : "本机历史 · 快捷键投递")
+                    .font(.caption).foregroundStyle(.secondary)
+                if let error = model.runtimeProfile.configurationError { Text(error).font(.caption).foregroundStyle(.red) }
                 Divider()
                 Text("版本 " + updates.displayedVersion).font(.caption).foregroundStyle(.secondary)
                 Text(updates.status).font(.caption).textSelection(.enabled)
@@ -34,18 +36,24 @@ struct RootView: View {
                 }
                 if !updates.relayStatus.isEmpty { Text(updates.relayStatus).font(.caption2).foregroundStyle(.secondary) }
                 HStack {
-                    Button(updates.isChecking ? "检查中…" : "检查更新") { updates.check() }.disabled(!updates.canCheck)
-                    Button("重试") { updates.retry() }.disabled(!updates.canCheck || updates.isRelaying)
+                    Button(updates.isChecking ? "检查中…" : "检查更新") { updates.check() }.disabled(!model.runtimeProfile.updatesEnabled || !updates.canCheck)
+                    Button("重试") { updates.retry() }.disabled(!model.runtimeProfile.updatesEnabled || !updates.canCheck || updates.isRelaying)
                 }.controlSize(.small)
-                Link("测试版下载", destination: UpdateCoordinator.downloadPage).font(.caption)
+                Link(model.runtimeProfile.isUpdateTest ? "测试通道发布页" : "测试版下载", destination: model.runtimeProfile.downloadPage).font(.caption)
                     .help("打开 GitHub 安装包下载页，测试版需要手动安装")
                 if updates.canInstall {
                     Button("更新至 " + (updates.candidateVersion ?? "")) { updates.requestInstall() }
                         .buttonStyle(.borderedProminent).controlSize(.small)
+                        .disabled(!model.runtimeProfile.updatesEnabled)
                 }
             }.padding()
         } detail: {
             VStack(spacing: 0) {
+                if model.runtimeProfile.isUpdateTest {
+                    Text("独立更新测试：仅用于 0.1.3 → 0.1.4。设置、历史和更新缓存与正式应用分开；普通传输、剪贴板操作、全局快捷键和系统通知均停用。")
+                        .font(.callout).foregroundStyle(.orange).frame(maxWidth: .infinity, alignment: .leading).padding(12)
+                    Divider()
+                }
                 switch navigation.page {
                 case .history: history
                 case .logs: TransferLogsView(model: model)
@@ -66,6 +74,7 @@ struct RootView: View {
                     if navigation.page == .history {
                         Label("仅快捷键发送", systemImage: "keyboard").help("\(model.preferences.shortcuts.copy.displayName) 复制、记录并发送；Command+C 不记录、不上传")
                         Button { model.chooseFiles() } label: { Label("添加文件", systemImage: "plus") }
+                            .disabled(!model.allowsBusinessTransfers)
                     }
                 }
             }
@@ -76,7 +85,7 @@ struct RootView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: FailureNotifications.openLogs)) { _ in navigation.select(.logs) }
         .onDrop(of: [UTType.fileURL], isTargeted: $dropped) { providers in
-            guard navigation.acceptsFileDrop else { return false }
+            guard model.allowsBusinessTransfers, navigation.acceptsFileDrop else { return false }
             for provider in providers {
                 _ = provider.loadObject(ofClass: URL.self) { url, _ in if let url { Task { @MainActor in model.addFiles([url], automatic: false) } } }
             }
@@ -120,8 +129,8 @@ struct RootView: View {
             if model.visibleEntries.isEmpty {
                 Spacer()
                 Image(systemName: "doc.on.clipboard").font(.system(size: 42)).foregroundStyle(.secondary)
-                Text(model.search.isEmpty ? "\(model.preferences.shortcuts.copy.displayName) 复制并发送到内网" : "没有匹配记录").font(.headline).padding(.top)
-                Text("Command+C 不记录、不上传；也可以拖入文件或文件夹发送。") .foregroundStyle(.secondary).padding(.top, 4)
+                Text(model.runtimeProfile.isUpdateTest ? "请从左下角检查测试更新" : (model.search.isEmpty ? "\(model.preferences.shortcuts.copy.displayName) 复制并发送到内网" : "没有匹配记录")).font(.headline).padding(.top)
+                Text(model.runtimeProfile.isUpdateTest ? "本窗口不读取正式配置或 FTP 密码，也不会发送任何文件。" : "Command+C 不记录、不上传；也可以拖入文件或文件夹发送。") .foregroundStyle(.secondary).padding(.top, 4)
                 Spacer()
             } else {
                 HSplitView {
@@ -130,8 +139,8 @@ struct RootView: View {
                             HistoryRow(entry: entry, privacy: model.privacy).tag(entry.id)
                                 .onTapGesture(count: 2) { model.resend(entry) }
                                 .contextMenu {
-                                    Button("恢复到剪贴板") { model.restore(entry) }
-                                    Button("重新发送") { model.resend(entry) }
+                                    Button("恢复到剪贴板") { model.restore(entry) }.disabled(!model.allowsBusinessTransfers)
+                                    Button("重新发送") { model.resend(entry) }.disabled(!model.allowsBusinessTransfers)
                                     if let path = entry.paths.first { Button("在 Finder 中显示") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)]) } }
                                     Divider()
                                     Button("删除记录", role: .destructive) { model.delete(entry) }
@@ -154,8 +163,8 @@ struct RootView: View {
                     else { Text(entry.kind == .text ? entry.content : entry.paths.joined(separator: "\n")).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }
                 }
                 HStack {
-                    Button("恢复剪贴板") { model.restore(entry) }
-                    Button("重新发送") { model.resend(entry) }.buttonStyle(.borderedProminent)
+                    Button("恢复剪贴板") { model.restore(entry) }.disabled(!model.allowsBusinessTransfers)
+                    Button("重新发送") { model.resend(entry) }.buttonStyle(.borderedProminent).disabled(!model.allowsBusinessTransfers)
                 }
             }.padding(16)
         } else { Text("选择一条记录查看详情").foregroundStyle(.secondary).frame(maxWidth: .infinity, maxHeight: .infinity) }
@@ -166,7 +175,7 @@ struct RootView: View {
                 HStack(spacing: 12) {
                     AppLogo(size: 80)
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("闪传").font(.largeTitle)
+                        Text(model.runtimeProfile.applicationName).font(.largeTitle)
                         Text(updates.displayedVersion).foregroundStyle(.secondary)
                     }
                 }

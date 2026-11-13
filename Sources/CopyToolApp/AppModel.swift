@@ -5,6 +5,8 @@ import CryptoKit
 import Combine
 
 @MainActor final class AppModel: ObservableObject {
+    let runtimeProfile: AppRuntimeProfile
+    var allowsBusinessTransfers: Bool { runtimeProfile.allowsBusinessTransfers }
     @Published var entries: [HistoryEntry] = []
     @Published var preferences = AppPreferences()
     @Published var password = ""
@@ -66,13 +68,24 @@ import Combine
         }
     }
 
-    init(root: URL? = nil, readPassword: @escaping () -> String = PasswordVault.read,
-         writePassword: @escaping (String) throws -> Void = PasswordVault.write,
-         sendFailureNotice: ((SendFailureNotice) -> Void)? = nil) {
-        self.sendFailureNotice = sendFailureNotice ?? (root == nil ? { FailureNotifications.shared.send($0) } : { _ in })
-        self.readPassword = readPassword
-        self.writePassword = writePassword
-        let base = root ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("CopyToolIndependent", isDirectory: true)
+    init(root: URL? = nil, readPassword: (() -> String)? = nil,
+         writePassword: ((String) throws -> Void)? = nil,
+         sendFailureNotice: ((SendFailureNotice) -> Void)? = nil,
+         runtimeProfile: AppRuntimeProfile = .production) {
+        self.runtimeProfile = runtimeProfile
+        if runtimeProfile.isUpdateTest {
+            self.sendFailureNotice = { _ in }
+            self.readPassword = { "" }
+            self.writePassword = { value in
+                guard value.isEmpty else { throw NSError(domain: "ShanchuanUpdateTest", code: 1,
+                    userInfo: [NSLocalizedDescriptionKey: "独立更新测试不保存 FTP 密码。"] ) }
+            }
+        } else {
+            self.sendFailureNotice = sendFailureNotice ?? (root == nil ? { FailureNotifications.shared.send($0) } : { _ in })
+            self.readPassword = readPassword ?? PasswordVault.read
+            self.writePassword = writePassword ?? PasswordVault.write
+        }
+        let base = root ?? runtimeProfile.dataRoot
         logRepository = TransferLogRepository(root: base)
         do { repository = try HistoryRepository(root: base) }
         catch { fatalError("无法建立应用数据目录：\(error.localizedDescription)") }
@@ -83,9 +96,18 @@ import Combine
             try repository.save(entries)
         } catch { message = "读取本地数据失败：\(error.localizedDescription)" }
         // Password is read only when needed; first launch never requests keychain access.
-        if !preferences.host.isEmpty { password = readPassword(); message = "FTP 已配置 · 等待发送" }
+        if !preferences.host.isEmpty { password = self.readPassword(); message = "FTP 已配置 · 等待发送" }
         persistedPassword = password
         loadTransferLogs()
+        if runtimeProfile.isUpdateTest {
+            // 本地规则等配置仍可编辑，但合成地址永远不会被用于连接。
+            if preferences.host.isEmpty { preferences.host = "update-test.invalid" }
+            if preferences.username.isEmpty { preferences.username = "update-test" }
+            preferences.shortcuts.enabled = false
+            message = "独立更新测试 · 普通传输、剪贴板与全局快捷键已停用"
+            shortcutStatus = "独立更新测试不注册全局快捷键或申请辅助功能权限。"
+            return
+        }
         do { try shortcutService.apply(preferences.shortcuts) }
         catch {
             shortcutSettingsError = error.localizedDescription
@@ -95,20 +117,25 @@ import Combine
         shortcutActivationObserver = NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)
             .sink { [weak self] _ in Task { @MainActor in self?.refreshShortcutPermission() } }
     }
-    func refreshShortcutPermission() { shortcutPermissionGranted = shortcutService.isAccessibilityTrusted }
+    func refreshShortcutPermission() {
+        guard allowsBusinessTransfers else { return }
+        shortcutPermissionGranted = shortcutService.isAccessibilityTrusted
+    }
     func recordShortcutStatus(_ status: String) {
         shortcutStatus = status
         let warning = ["未发送", "未执行", "未能", "已取消", "不可", "无法"].contains { status.contains($0) }
         log("快捷键：" + status, level: warning ? .warning : .info)
     }
-    func openShortcutAccessibilitySettings() { shortcutService.openAccessibilitySettings() }
-    func copyInFrontmostApplication() { shortcutService.copyInFrontmostApplication() }
-    func pasteInFrontmostApplication() { shortcutService.pasteInFrontmostApplication() }
+    func openShortcutAccessibilitySettings() { guard allowsBusinessTransfers else { return }; shortcutService.openAccessibilitySettings() }
+    func copyInFrontmostApplication() { guard allowsBusinessTransfers else { return }; shortcutService.copyInFrontmostApplication() }
+    func pasteInFrontmostApplication() { guard allowsBusinessTransfers else { return }; shortcutService.pasteInFrontmostApplication() }
     func setShortcutRecording(_ active: Bool) {
+        guard allowsBusinessTransfers else { return }
         do { try shortcutService.setRecordingShortcut(active) }
         catch { shortcutSettingsError = error.localizedDescription }
     }
     @discardableResult func saveShortcutConfiguration(_ config: CopyPasteShortcuts) -> Bool {
+        guard allowsBusinessTransfers else { shortcutSettingsError = "独立更新测试不启用全局快捷键。"; return false }
         shortcutSettingsError = ""
         if let issue = config.validationError { shortcutSettingsError = issue; return false }
         let previous = preferences.shortcuts
@@ -224,6 +251,7 @@ import Combine
         }
     }
     func migrateOriginalFTP() {
+        guard allowsBusinessTransfers else { settingsError = "独立更新测试不迁移原应用配置。"; return }
         settingsError = ""
         let source = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".copy_tool/config.toml")
         let previous = preferences; let oldPassword = password
@@ -255,6 +283,7 @@ import Combine
         }
     }
     func sendValidationSamples() {
+        guard allowsBusinessTransfers else { return }
         guard !running, tasks.isEmpty else { log("请等待当前传输完成后再发送验证样例"); return }
         if let issue = preferences.validationError { log("未发送验证样例：" + issue, level: .error); return }
         guard !password.isEmpty else { log("未发送验证样例：FTP 密码缺失", level: .error); return }
@@ -288,6 +317,7 @@ import Combine
     // 只由自定义复制完成回调调用；服务确认本次复制改变了剪贴板后才进入这里。
     // 不监听普通剪贴板变化；仅冻结这次明确复制发送的内容。
     func captureClipboardForShortcut(expectedChangeCount: Int) {
+        guard allowsBusinessTransfers else { return }
         let pb = NSPasteboard.general
         captureClipboard(pb, expectedChangeCount: expectedChangeCount)
     }
@@ -316,17 +346,20 @@ import Combine
         }
     }
     func addImage(_ data: Data, automatic: Bool = true) {
+        guard allowsBusinessTransfers else { return }
         guard !automatic else { return }
         do { let file = try repository.saveImage(data); add(HistoryEntry(kind: .image, content: "剪贴板图片", paths: [file.path]), automatic: automatic) }
         catch { log("图片保存失败：\(error.localizedDescription)", level: .error) }
     }
     func addFiles(_ urls: [URL], automatic: Bool = true) {
+        guard allowsBusinessTransfers else { return }
         guard !automatic else { return }
         let paths = urls.filter(\.isFileURL).map(\.path)
         guard !paths.isEmpty else { return }
         add(HistoryEntry(kind: .file, content: "\(paths.count) 个文件", paths: paths), automatic: automatic)
     }
     func add(_ item: HistoryEntry, automatic: Bool) {
+        guard allowsBusinessTransfers else { return }
         // 防御旧调用：普通复制既不留历史/缓存，也不进入发送流程。
         guard !automatic else { return }
         if let first = entries.first, first.kind == item.kind && first.content == item.content && first.paths == item.paths {
@@ -338,10 +371,12 @@ import Combine
         enqueue(item)
     }
     func chooseFiles() {
+        guard allowsBusinessTransfers else { return }
         let panel = NSOpenPanel(); panel.canChooseFiles = true; panel.canChooseDirectories = true; panel.allowsMultipleSelection = true
         panel.begin { [weak self] response in if response == .OK { Task { @MainActor in self?.addFiles(panel.urls, automatic: false) } } }
     }
     func restore(_ entry: HistoryEntry) {
+        guard allowsBusinessTransfers else { return }
         let pb = NSPasteboard.general; pb.clearContents()
         if entry.kind == .text { pb.setString(entry.content, forType: .string) }
         else if entry.kind == .image, let path = entry.paths.first, let data = try? Data(contentsOf: URL(fileURLWithPath: path)) { pb.setData(data, forType: .png) }
@@ -353,6 +388,7 @@ import Combine
         enqueue(entry)
     }
     func enqueue(_ entry: HistoryEntry) {
+        guard allowsBusinessTransfers else { log("独立更新测试不执行普通 FTP 传输"); return }
         guard !updateInstallationIsCommitting else { log("正在安装更新，请稍后再发送", level: .warning); return }
         if let issue = preferences.validationError { log("未发送：\(issue)", level: .error); return }
         guard !password.isEmpty else { log("未发送：请在设置中填写密码", level: .error); return }
@@ -365,6 +401,7 @@ import Combine
         if let i = entries.firstIndex(where: { $0.id == id }) { entries[i].status = status; persist() }
     }
     func beginNext() {
+        guard allowsBusinessTransfers else { return }
         guard !running, !tasks.isEmpty else { return }
         let (entry, config, secret) = tasks.removeFirst(); queued = tasks.count
         running = true; cancelling = false; activeTransfer = entry.kind == .text ? "文本" : entry.title; progress = 0

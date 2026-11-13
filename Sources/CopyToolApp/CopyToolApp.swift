@@ -3,43 +3,52 @@ import AppKit
 
 @main struct CopyToolApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var delegate
-    @StateObject private var model = AppModel()
-    @StateObject private var updater = AppUpdater()
-    @StateObject private var updates = UpdateCoordinator()
+    private let runtimeProfile: AppRuntimeProfile
+    @StateObject private var model: AppModel
+    @StateObject private var updater: AppUpdater
+    @StateObject private var updates: UpdateCoordinator
     @StateObject private var navigation = AppNavigation()
     @StateObject private var settings = SettingsPageSession()
+    init() {
+        let profile = AppRuntimeProfile.current
+        runtimeProfile = profile
+        _model = StateObject(wrappedValue: AppModel(runtimeProfile: profile))
+        _updater = StateObject(wrappedValue: AppUpdater(channel: profile.updateChannel))
+        _updates = StateObject(wrappedValue: UpdateCoordinator(root: profile.isUpdateTest ? profile.dataRoot : nil,
+            channel: profile.updateChannel))
+    }
     var body: some Scene {
-        Window("闪传", id: "main") {
+        Window(runtimeProfile.applicationName, id: "main") {
             RootView(model: model, updates: updates, navigation: navigation, settings: settings).frame(minWidth: 820, minHeight: 560)
                 .onAppear {
-                    delegate.connectTransferProgress(model)
+                    if model.allowsBusinessTransfers { delegate.connectTransferProgress(model) }
                     delegate.navigation = navigation
                     settings.connect(model: model)
                     navigation.prepareToLeaveSettings = { [weak pageSession = settings] in pageSession?.prepareToLeave() ?? true }
                     updates.businessIsBusy = { model.transferSnapshot.isActive || model.queued > 0 }
                     updates.ftpSettings = {
-                        guard model.preferences.validationError == nil else { return nil }
+                        guard model.allowsBusinessTransfers, model.preferences.validationError == nil else { return nil }
                         return .init(host: model.preferences.host, port: model.preferences.port,
                             username: model.preferences.username, password: model.password, directory: model.preferences.directory)
                     }
-                    updates.install = { updater.install(version: $0) }
+                    updates.install = { runtimeProfile.updatesEnabled && updater.install(version: $0) }
                     updates.writeLog = { text, error in model.log(text, level: error ? .warning : .info) }
                     updater.isTransferActive = { model.transferSnapshot.isActive || model.queued > 0 || updates.isRelaying }
                     updater.setInstallationCommitting = { model.updateInstallationIsCommitting = $0 }
                     updater.cycleFinished = { updates.installationCycleFinished(error: $0) }
                     updater.report = { model.log($0, level: .warning) }
-                    updates.start()
+                    if runtimeProfile.updatesEnabled { updates.start() }
                 }
         }.defaultSize(width: 1000, height: 720)
         .commands {
             AppNavigationCommands(navigation: navigation)
-            UpdateCommands(updates: updates)
+            UpdateCommands(updates: updates, enabled: runtimeProfile.updatesEnabled)
             CommandGroup(after: .pasteboard) {
-                Button("添加文件…") { model.chooseFiles() }.keyboardShortcut("o")
-                Button("恢复选中记录") { if let item = model.selectedEntry { model.restore(item) } }.keyboardShortcut("r")
+                Button("添加文件…") { model.chooseFiles() }.keyboardShortcut("o").disabled(!model.allowsBusinessTransfers)
+                Button("恢复选中记录") { if let item = model.selectedEntry { model.restore(item) } }.keyboardShortcut("r").disabled(!model.allowsBusinessTransfers)
             }
         }
-        MenuBarExtra {
+        MenuBarExtra(isInserted: .constant(!runtimeProfile.isUpdateTest)) {
             MenuContents(model: model, navigation: navigation)
         } label: {
             if model.transferSnapshot.isActive {
@@ -50,14 +59,16 @@ import AppKit
 }
 struct UpdateCommands: Commands {
     @ObservedObject var updates: UpdateCoordinator
+    var enabled = true
     @Environment(\.openWindow) private var openWindow
     var body: some Commands {
         CommandGroup(after: .appInfo) {
             Button("检查更新…") {
+                guard enabled else { return }
                 openWindow(id: "main")
                 NSApp.activate(ignoringOtherApps: true)
                 updates.check()
-            }.disabled(!updates.canCheck)
+            }.disabled(!enabled || !updates.canCheck)
         }
     }
 }
@@ -87,7 +98,7 @@ struct UpdateCommands: Commands {
         transferPresenter?.stop()
     }
     func applicationDidFinishLaunching(_ notification: Notification) {
-        FailureNotifications.shared.configure()
+        if !AppRuntimeProfile.current.isUpdateTest { FailureNotifications.shared.configure() }
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
     }

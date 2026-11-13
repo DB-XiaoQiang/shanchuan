@@ -62,6 +62,7 @@ private struct GitHubLatestRelease: Decodable {
     var writeLog: ((String, Bool) -> Void)?
     private let root: URL
     private let publicKey: String?
+    private let channel: UpdateChannel
     private var state: UpdatePersistentState
     private var release: VerifiedRelease?
     private var timer: Timer?
@@ -76,11 +77,13 @@ private struct GitHubLatestRelease: Decodable {
     private var started = false
 
     init(root: URL? = nil, currentVersion: String? = nil, publicKey: String? = nil, session: URLSession? = nil,
+         channel: UpdateChannel = .production,
          dataLoader: (@Sendable (URL, Int64) async throws -> Data)? = nil,
          upload: (@Sendable (URL, String, FTPSettings) async throws -> Void)? = nil) {
         self.root = (root ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("CopyToolIndependent")).appendingPathComponent("Updates", isDirectory: true)
         self.currentVersion = currentVersion ?? Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.0.0"
+        self.channel = channel
         self.publicKey = publicKey ?? Bundle.main.url(forResource: "update-public-key", withExtension: "pem").flatMap { try? String(contentsOf: $0, encoding: .utf8) }
         self.session = session ?? URLSession(configuration: .ephemeral)
         self.dataLoader = dataLoader; self.testUpload = upload
@@ -89,6 +92,8 @@ private struct GitHubLatestRelease: Decodable {
         lastCheckCompletedAt = state.lastCheckCompletedAt
         candidateVersion = nil
         if self.publicKey == nil { status = "此构建未配置更新验签公钥" }
+        if channel.isTest { relayStatus = "独立测试通道：仅更新测试应用，不转发 FTP" }
+        if let error = channel.configurationError { status = error }
     }
     deinit {
         timer?.invalidate()
@@ -97,12 +102,12 @@ private struct GitHubLatestRelease: Decodable {
     }
     var displayedVersion: String { Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "开发构建" }
     var canInstall: Bool { candidateVersion != nil && !waitingForInstallation }
-    var canCheck: Bool { !isChecking && !waitingForInstallation && publicKey != nil }
+    var canCheck: Bool { !isChecking && !waitingForInstallation && publicKey != nil && channel.configurationError == nil }
     var isBusy: Bool { isRelaying || waitingForInstallation }
 
     func start() {
         guard !started else { return }; started = true
-        guard publicKey != nil else { return }
+        guard publicKey != nil, channel.configurationError == nil else { return }
         enabled = true
         do { try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700]) }
         catch { status = "更新缓存不可用：\(error.localizedDescription)"; return }
@@ -126,6 +131,7 @@ private struct GitHubLatestRelease: Decodable {
     func tick(now: Date = Date()) {
         guard enabled, !waitingForInstallation else { return }
         if state.schedule.isDue(at: now) && !isChecking { Task { await performCheck() } }
+        guard channel.allowsRelay else { return }
         let endpoint = ftpSettings().map(Self.endpointIdentity) ?? ""
         let changed = endpoint != lastEndpoint
         if changed { lastEndpoint = endpoint; state.relayRetryAfter = nil }
@@ -134,7 +140,7 @@ private struct GitHubLatestRelease: Decodable {
     func retry() {
         state.relayRetryAfter = nil; state.relayFailures = 0
         check()
-        if !isRelaying { beginRelay() }
+        if channel.allowsRelay && !isRelaying { beginRelay() }
     }
     private func save() throws {
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
@@ -147,20 +153,22 @@ private struct GitHubLatestRelease: Decodable {
         do {
             let directory = cacheDirectory(version: version, identity: identity)
             let verified = try UpdateVerifier.verify(manifest: Data(contentsOf: directory.appendingPathComponent("update-manifest.json")),
-                signature: Data(contentsOf: directory.appendingPathComponent("update-manifest.sig")), publicKeyPEM: publicKey)
+                signature: Data(contentsOf: directory.appendingPathComponent("update-manifest.sig")), publicKeyPEM: publicKey,
+                expectedChannel: channel.expectedManifestChannel)
+            try channel.validateManifestVersion(verified.manifest.version)
             guard verified.identity == identity, verified.manifest.version == version else { return }
             let target = try ReleaseVersion(version)
             guard target >= (try ReleaseVersion(currentVersion)) else { return }
             if let highest = state.highestVersion, target < (try ReleaseVersion(highest)) { return }
             for asset in selectedAssets(verified) { try UpdateVerifier.verify(file: directory.appendingPathComponent(asset.name), asset: asset) }
-            try UpdateVerifier.verifyWindowsFeed(verified, directory: directory)
+            if channel.requiresWindowsAssets { try UpdateVerifier.verifyWindowsFeed(verified, directory: directory) }
             release = verified
             showCandidate(verified)
         } catch { status = "上次更新缓存需要重新下载" }
     }
     private func selectedAssets(_ release: VerifiedRelease) -> [ReleaseAsset] {
         release.manifest.assets.filter {
-            ($0.platform == "windows" && $0.arch == "x64" && ["velopack-full", "velopack-feed"].contains($0.kind)) ||
+            (channel.requiresWindowsAssets && $0.platform == "windows" && $0.arch == "x64" && ["velopack-full", "velopack-feed"].contains($0.kind)) ||
             ($0.platform == "macos" && $0.arch == "arm64" && ["sparkle-zip", "appcast"].contains($0.kind))
         }
     }
@@ -176,9 +184,9 @@ private struct GitHubLatestRelease: Decodable {
         } else { candidateVersion = nil; status = "当前已是最新版本" }
     }
     private func performCheck(manual: Bool = false) async {
-        guard !isChecking, !waitingForInstallation, let publicKey else { return }
+        guard !isChecking, !waitingForInstallation, let publicKey, channel.configurationError == nil else { return }
         isChecking = true; status = "正在检查更新…"
-        if manual { writeLog?("开始手动检查正式更新", false) }
+        if manual { writeLog?(channel.isTest ? "开始手动检查独立测试更新" : "开始手动检查正式更新", false) }
         var failed = false
         defer {
             let completedAt = Date()
@@ -192,24 +200,27 @@ private struct GitHubLatestRelease: Decodable {
             try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
             let metadataBytes: Data
             do {
-                metadataBytes = try await fetch(URL(string: "https://api.github.com/repos/DB-XiaoQiang/shanchuan/releases/latest")!, maximum: 2 * 1024 * 1024)
+                metadataBytes = try await fetch(channel.metadataURL, maximum: 2 * 1024 * 1024)
             } catch UpdateHTTPFailure.status(404) {
                 state.schedule.succeeded(at: Date()); try save()
-                if let release { showCandidate(release) } else { status = "暂无正式更新；测试版请手动下载" }
+                if let release { showCandidate(release) } else { status = channel.noReleaseStatus }
                 return
             }
             let metadata = try JSONDecoder().decode(GitHubLatestRelease.self, from: metadataBytes)
-            guard !metadata.draft, !metadata.prerelease, metadata.tag_name.hasPrefix("v") else { throw UpdateFailure.invalid("只接受正式发行版。") }
-            let version = String(metadata.tag_name.dropFirst()); let latest = try ReleaseVersion(version)
+            let version = try channel.version(fromTag: metadata.tag_name, draft: metadata.draft, prerelease: metadata.prerelease)
+            let latest = try ReleaseVersion(version)
             if let highest = state.highestVersion, latest < (try ReleaseVersion(highest)) { throw UpdateFailure.invalid("拒绝回放旧版本更新。") }
             guard latest >= (try ReleaseVersion(currentVersion)) else { throw UpdateFailure.invalid("拒绝低于当前安装版本的发行包。") }
-            let base = Self.assetBase(version: version)
+            let base = channel.assetBase(version: version)
             let bytes = try await fetch(base.appendingPathComponent("update-manifest.json"), maximum: Int64(UpdateVerifier.maximumManifestBytes))
             let signature = try await fetch(base.appendingPathComponent("update-manifest.sig"), maximum: 256)
-            let verified = try UpdateVerifier.verify(manifest: bytes, signature: signature, publicKeyPEM: publicKey)
+            let verified = try UpdateVerifier.verify(manifest: bytes, signature: signature, publicKeyPEM: publicKey,
+                expectedChannel: channel.expectedManifestChannel)
             guard verified.manifest.version == version else { throw UpdateFailure.invalid("GitHub 标签与签名清单版本不一致。") }
-            guard verified.manifest.asset(platform: "windows", arch: "x64", kind: "velopack-full") != nil,
-                  verified.manifest.asset(platform: "windows", arch: "x64", kind: "velopack-feed") != nil,
+            try channel.validateManifestVersion(verified.manifest.version)
+            guard (!channel.requiresWindowsAssets ||
+                    (verified.manifest.asset(platform: "windows", arch: "x64", kind: "velopack-full") != nil &&
+                     verified.manifest.asset(platform: "windows", arch: "x64", kind: "velopack-feed") != nil)),
                   verified.manifest.asset(platform: "macos", arch: "arm64", kind: "sparkle-zip") != nil,
                   verified.manifest.asset(platform: "macos", arch: "arm64", kind: "appcast") != nil else {
                 throw UpdateFailure.invalid("正式发行版缺少平台更新附件。")
@@ -226,7 +237,7 @@ private struct GitHubLatestRelease: Decodable {
                 if FileManager.default.fileExists(atPath: destination.path) { try FileManager.default.removeItem(at: destination) }
                 try FileManager.default.moveItem(at: temporary, to: destination)
             }
-            try UpdateVerifier.verifyWindowsFeed(verified, directory: directory)
+            if channel.requiresWindowsAssets { try UpdateVerifier.verifyWindowsFeed(verified, directory: directory) }
             try bytes.write(to: directory.appendingPathComponent("update-manifest.json"), options: .atomic)
             try signature.write(to: directory.appendingPathComponent("update-manifest.sig"), options: .atomic)
             release = verified; state.candidateVersion = version; state.candidateIdentity = verified.identity; state.highestVersion = version
@@ -240,9 +251,6 @@ private struct GitHubLatestRelease: Decodable {
             state.schedule.failed(at: Date()); try? save()
             if !manual { writeLog?(status, true) }
         }
-    }
-    private static func assetBase(version: String) -> URL {
-        URL(string: repository + "/releases/download/v" + version + "/")!
     }
     private func fetch(_ url: URL, maximum: Int64) async throws -> Data {
         let file = try await download(url, maximum: maximum); defer { try? FileManager.default.removeItem(at: file) }
@@ -277,6 +285,7 @@ private struct GitHubLatestRelease: Decodable {
         UpdateVerifier.sha256(Data("\(settings.host.lowercased()):\(settings.port)/\(settings.username)/\(settings.directory)".utf8))
     }
     private func beginRelay() {
+        guard channel.allowsRelay else { return }
         guard !isRelaying, !waitingForInstallation, let verified = release else { return }
         guard let settings = ftpSettings(), !settings.host.isEmpty else { relayStatus = "等待配置 FTP 后转发更新"; return }
         let identity = Self.endpointIdentity(settings) + ":" + verified.manifest.version + ":" + verified.identity
@@ -328,8 +337,11 @@ private struct GitHubLatestRelease: Decodable {
     }
     func requestInstall() {
         guard let version = candidateVersion, let verified = release, !waitingForInstallation else { return }
-        let alert = NSAlert(); alert.messageText = "更新闪传到 \(version)？"
-        alert.informativeText = releaseNotes + "\n将等待普通传输和更新转发结束后安装并重启。"
+        let alert = NSAlert()
+        alert.messageText = channel.isTest ? "更新“闪传更新测试”到 \(version)？" : "更新闪传到 \(version)？"
+        alert.informativeText = releaseNotes + (channel.isTest
+            ? "\n仅替换独立测试应用；正式闪传、配置和 FTP 不受影响。确认后安装并重启测试应用。"
+            : "\n将等待普通传输和更新转发结束后安装并重启。")
         alert.addButton(withTitle: "更新"); alert.addButton(withTitle: "稍后")
         guard alert.runModal() == .alertFirstButtonReturn else { return }
         waitingForInstallation = true; status = "已确认，等待传输完成后更新"

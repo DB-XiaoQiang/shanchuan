@@ -6,11 +6,13 @@ import CopyToolCore
 @MainActor final class AppUpdater: NSObject, ObservableObject, SPUUpdaterDelegate {
     private var controller: SPUStandardUpdaterController?
     private var approvedVersion: String?
+    private let channel: UpdateChannel
     var isTransferActive: () -> Bool = { false }
     var setInstallationCommitting: (Bool) -> Void = { _ in }
     var cycleFinished: (String?) -> Void = { _ in }
     var report: (String) -> Void = { _ in }
-    override init() {
+    init(channel: UpdateChannel = .production) {
+        self.channel = channel
         super.init()
         // Migrate previous Sparkle preferences before any updater is created.
         for key in ["SUEnableAutomaticChecks", "SUAutomaticallyUpdate", "SUAutomaticallyDownloadUpdates"] {
@@ -18,6 +20,10 @@ import CopyToolCore
         }
     }
     func install(version: String) -> Bool {
+        do {
+            if let error = channel.configurationError { throw UpdateFailure.invalid(error) }
+            try channel.validateManifestVersion(version)
+        } catch { report(error.localizedDescription); return false }
         guard let key = Bundle.main.object(forInfoDictionaryKey: "SUPublicEDKey") as? String, !key.isEmpty else {
             report("此构建尚未配置 Sparkle 验签公钥，请手动安装正式 DMG。")
             return false
@@ -35,7 +41,7 @@ import CopyToolCore
     }
     func feedURLString(for updater: SPUUpdater) -> String? {
         guard let approvedVersion else { return nil }
-        return UpdateCoordinator.repository + "/releases/download/v" + approvedVersion + "/appcast.xml"
+        return channel.sparkleFeedURL(version: approvedVersion)
     }
     static func validateTarget(actual: String, approved: String?) throws {
         guard let approved, actual == approved else { throw UpdateFailure.invalid("更新源返回的版本与已确认版本不一致。") }

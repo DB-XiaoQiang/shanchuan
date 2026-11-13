@@ -36,7 +36,7 @@ struct SettingsView: View {
                                 Text(connectionTest.isTesting ? "测试中…" : "测试连接")
                             }
                         }
-                        .disabled(connectionTest.isTesting)
+                        .disabled(!model.allowsBusinessTransfers || connectionTest.isTesting)
                     }
                     TextField("端口", text: $autosave.portText)
                     TextField("目标目录", text: $autosave.draft.directory)
@@ -61,7 +61,7 @@ struct SettingsView: View {
                     TextField("控制文件名", text: $autosave.draft.textRemoteName)
                     Toggle("按原协议路由加密标记文件", isOn: $autosave.draft.autoDecrypt)
                     TextField("解密目录前缀", text: $autosave.draft.decryptPrefix)
-                }
+                }.disabled(!model.allowsBusinessTransfers)
                 Section("目录排除规则") {
                     DirectoryExclusionSettingsView(rules: $autosave.draft.directoryExclusionRules,
                         saveStatus: autosave.status, onEditingFinished: { autosave.flush() })
@@ -71,9 +71,10 @@ struct SettingsView: View {
                     Toggle("开启历史记录", isOn: $autosave.draft.historyEnabled)
                     Toggle("重发时恢复到本地剪贴板", isOn: $autosave.draft.restoreOnResend)
                     Toggle("登录后自动启动", isOn: $autostart).onChange(of: autostart) { enabled in
+                        guard model.allowsBusinessTransfers else { return }
                         do { if enabled { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() }; autostartError = "" }
                         catch { autostartError = error.localizedDescription; autostart = SMAppService.mainApp.status == .enabled }
-                    }
+                    }.disabled(!model.allowsBusinessTransfers)
                 }
                 Section("传输提示") {
                     Text("快捷键未发送或上传失败时显示系统通知，8 秒内合并重复提醒。")
@@ -89,8 +90,8 @@ struct SettingsView: View {
                     Button("预览进度卡片") { model.previewTransferProgress?() }
                     Text("显示准备状态、上传百分比和已上传大小；关闭卡片不会取消上传。")
                         .font(.caption).foregroundStyle(.secondary)
-                }
-                Section("复制发送 / 粘贴快捷键") { ShortcutSettingsView(model: model) }
+                }.disabled(!model.allowsBusinessTransfers)
+                Section("复制发送 / 粘贴快捷键") { ShortcutSettingsView(model: model) }.disabled(!model.allowsBusinessTransfers)
             }.formStyle(.grouped)
             if !migrationError.isEmpty { Text(migrationError).foregroundStyle(.red) }
             if !autostartError.isEmpty { Text("开机启动：\(autostartError)").foregroundStyle(.red) }
@@ -100,7 +101,7 @@ struct SettingsView: View {
                     model.migrateOriginalFTP()
                     migrationError = model.settingsError
                     if migrationError.isEmpty { autosave.reload() }
-                }
+                }.disabled(!model.allowsBusinessTransfers)
                 Button("撤销未保存修改") { autosave.reload(); migrationError = "" }
                     .disabled(!canDiscardChanges)
                 Text("测试连接不上传文件").font(.caption).foregroundStyle(.secondary)
