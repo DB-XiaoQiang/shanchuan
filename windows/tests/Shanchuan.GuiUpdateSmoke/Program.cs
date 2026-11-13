@@ -5,6 +5,7 @@ using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Windows.Automation;
 using Microsoft.Win32;
 using Shanchuan.Core;
@@ -133,6 +134,17 @@ internal static class Program
         var settings = new AppSettings { NetworkMode = NetworkMode.Unconfigured, Username = "gui-smoke-fixture", ReceiveIntervalSeconds = 600, TtlDays = 90, StartWithWindows = false };
         settings.Shortcuts.Enabled = false;
         new SettingsStore(AppData).Save(settings);
+        // The baseline is an unmodified historical application. Seed its real
+        // settings schema: newer fields would be discarded when that old GUI
+        // saves before installing, which is unrelated to preservation by the
+        // target version. Keep the byte-for-byte preservation assertion below.
+        var settingsPath = Path.Combine(AppData, "settings.json");
+        var legacySettings = JsonNode.Parse(File.ReadAllText(settingsPath))!.AsObject();
+        Require(legacySettings.Remove("language"), "Current fixture settings are missing the new language field.");
+        File.WriteAllText(settingsPath, legacySettings.ToJsonString(JsonOptions));
+        Require(!JsonNode.Parse(File.ReadAllText(settingsPath))!.AsObject().ContainsKey("language"),
+            "Historical GUI fixture must not contain unsupported language settings.");
+        Checks.Add("historical-settings-schema-without-new-language-field");
         var historyStore = new HistoryStore(AppData);
         Directory.CreateDirectory(historyStore.MediaDirectory);
         var media = Path.Combine(historyStore.MediaDirectory, "fixture.png");
@@ -200,6 +212,8 @@ internal static class Program
         Require(newer.Id != oldPid && ProductVersion(executable) == TargetVersion, "Native replacement did not change PID and actual GUI version.");
         Require(process.HasExited, "Old GUI remained running after native restart.");
         Require(new SettingsStore(AppData).Load().NetworkMode == NetworkMode.Unconfigured, "Network mode changed during upgrade.");
+        Require(new SettingsStore(AppData).Load().Language == Localization.DefaultLanguage,
+            "Historical configuration did not fall back to Simplified Chinese.");
         Require(DataSnapshot().OrderBy(x => x.Key).SequenceEqual(baseline.OrderBy(x => x.Key)), "Settings, history or referenced media changed during GUI upgrade.");
         Require(new WindowsCredentialStore().Read() == FixturePassword, "Actual GUI upgrade changed synthetic credentials.");
         Checks.Add("synthetic-windows-credential-preserved-across-both-gui-startups");
