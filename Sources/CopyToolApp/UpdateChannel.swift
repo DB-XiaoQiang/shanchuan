@@ -27,7 +27,7 @@ struct UpdateChannel: Equatable, Sendable {
         return URL(string: "https://api.github.com/repos/DB-XiaoQiang/shanchuan/releases/" + endpoint)!
     }
     var noReleaseStatus: String {
-        isTest ? L10n.text("测试更新尚未发布，请稍后重试") : L10n.text("暂无正式更新；测试版请手动下载")
+        isTest ? L10n.text("测试更新尚未发布，请稍后重试") : L10n.text("暂无可用更新")
     }
 
     func version(fromTag tag: String, draft: Bool, prerelease: Bool) throws -> String {

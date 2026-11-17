@@ -193,7 +193,8 @@ internal static class Program
         var oldPid = process.Id;
         var oldWindow = WaitFor(() => FindWindow(oldPid), 60, "old GUI window");
         WaitFor(() => Find(oldWindow, AutomationElement.NameProperty, "当前版本 v" + BaseVersion), 45, "old GUI footer version");
-        var installButton = WaitFor(() => Find(oldWindow, AutomationElement.NameProperty, "更新至 v" + TargetVersion), 60, "verified update footer button");
+        var installButton = WaitFor(() => Find(oldWindow, AutomationElement.AutomationIdProperty, "InstallUpdateNow") ??
+            Find(oldWindow, AutomationElement.NameProperty, "更新至 v" + TargetVersion), 60, "verified update footer button");
         WaitFor(() => installButton.Current.IsEnabled ? installButton : null, 30, "enabled footer install button");
         var baseline = DataSnapshot();
         Require(new WindowsCredentialStore().Read() == FixturePassword, "Old GUI startup changed synthetic credentials.");
@@ -204,15 +205,25 @@ internal static class Program
         Require(!File.Exists(managed) && !process.HasExited, "Real old GUI installed or staged without consent.");
         SaveScreenshot(oldWindow, "old-gui-before-approval.png");
         Checks.Add("real-old-gui-shows-candidate-without-staging-or-installing-before-consent");
-        // A one-second production tick can briefly disable this button, or make
-        // RequestInstallAsync return after UIA observed an enabled value. Retry
-        // the real footer action only while no modal confirmation is present.
-        var (confirmation, invoke) = WaitForRealConfirmation(oldPid, oldWindow, managed, process);
-        var yes = WaitFor(() => Find(confirmation, AutomationElement.AutomationIdProperty, "ConfirmUpdateInstall") ??
-            Find(confirmation, AutomationElement.AutomationIdProperty, "6"), 15, "localized or historical native update confirmation button");
-        Invoke(yes);
-        Require(invoke is not null && invoke.Wait(TimeSpan.FromSeconds(30)), "Footer click did not return after confirmation.");
-        Checks.Add("real-footer-and-native-yes-confirmation-invoked");
+        if (UpdateManifestVerifier.CompareVersions(BaseVersion, "0.2.4") >= 0)
+        {
+            WaitFor(() => Find(oldWindow, AutomationElement.NameProperty, "新版本 v" + TargetVersion), 15, "version shown before one-click consent");
+            var click = Task.Run(() => Invoke(installButton));
+            Require(click.Wait(TimeSpan.FromSeconds(30)), "One-click footer action did not return.");
+            Checks.Add("real-one-click-footer-authorized-exact-target-without-extra-confirmation");
+        }
+        else
+        {
+            // A one-second production tick can briefly disable this button, or make
+            // RequestInstallAsync return after UIA observed an enabled value. Retry
+            // the real footer action only while no modal confirmation is present.
+            var (confirmation, invoke) = WaitForRealConfirmation(oldPid, oldWindow, managed, process);
+            var yes = WaitFor(() => Find(confirmation, AutomationElement.AutomationIdProperty, "ConfirmUpdateInstall") ??
+                Find(confirmation, AutomationElement.AutomationIdProperty, "6"), 15, "localized or historical native update confirmation button");
+            Invoke(yes);
+            Require(invoke is not null && invoke.Wait(TimeSpan.FromSeconds(30)), "Footer click did not return after confirmation.");
+            Checks.Add("real-footer-and-native-yes-confirmation-invoked");
+        }
         // Velopack starts short-lived Shanchuan hook processes while replacing
         // files. Accept only the actual relaunched main GUI with every version,
         // PID, window and footer condition satisfied together.

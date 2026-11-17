@@ -29,27 +29,7 @@ struct RootView: View {
                 Text(model.runtimeProfile.isUpdateTest ? L10n.text("独立测试通道 · 不连接 FTP") : L10n.text("本机历史 · 快捷键投递"))
                     .font(.caption).foregroundStyle(.secondary)
                 if let error = model.runtimeProfile.configurationError { Text(error).font(.caption).foregroundStyle(.red) }
-                Divider()
-                Text(L10n.text("版本 ") + updates.displayedVersion).font(.caption).foregroundStyle(.secondary)
-                Text(updates.status).font(.caption).textSelection(.enabled)
-                if let progress = updates.downloadProgress { UpdateDownloadProgressView(progress: progress) }
-                if let checkedAt = updates.lastCheckCompletedAt {
-                    Text(L10n.text("最近检查：") + L10n.date(checkedAt))
-                        .font(.caption2).foregroundStyle(.secondary)
-                }
-                if !updates.relayStatus.isEmpty { Text(updates.relayStatus).font(.caption2).foregroundStyle(.secondary) }
-                ViewThatFits(in: .horizontal) {
-                    HStack { checkUpdatesButton; retryUpdateButton }.fixedSize(horizontal: true, vertical: false)
-                    VStack(alignment: .leading) { checkUpdatesButton; retryUpdateButton }
-                }.controlSize(.small)
-                Link(model.runtimeProfile.isUpdateTest ? L10n.text("测试通道发布页") : L10n.text("测试版下载"), destination: model.runtimeProfile.downloadPage).font(.caption)
-                    .help(L10n.text("打开 GitHub 安装包下载页，测试版需要手动安装"))
-                if updates.canInstall {
-                    UpdateInstallReadyView(version: updates.candidateVersion ?? "", releaseNotes: updates.releaseNotes) {
-                        updates.requestInstall()
-                    }
-                        .disabled(!model.runtimeProfile.updatesEnabled)
-                }
+                UpdateStatusPanel(updates: updates, enabled: model.runtimeProfile.updatesEnabled)
             }.padding()
         } detail: {
             VStack(spacing: 0) {
@@ -100,14 +80,6 @@ struct RootView: View {
             Button(L10n.text("取消"), role: .cancel) {}
             Button(L10n.text("清空记录"), role: .destructive) { model.clearHistory() }
         } message: { Text(L10n.text("会删除本应用保存的文本和图片记录。原始文件不会删除。")) }
-    }
-    private var checkUpdatesButton: some View {
-        Button(updates.checkButtonTitle) { updates.check() }
-            .disabled(!model.runtimeProfile.updatesEnabled || !updates.canCheck)
-    }
-    private var retryUpdateButton: some View {
-        Button(L10n.text("重试")) { updates.retry() }
-            .disabled(!model.runtimeProfile.updatesEnabled || !updates.canCheck || updates.isRelaying)
     }
     private var history: some View {
         VStack(spacing: 0) {

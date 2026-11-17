@@ -67,6 +67,7 @@ private struct GitHubLatestRelease: Decodable {
     @Published private(set) var candidateVersion: String?
     @Published private(set) var releaseNotes = ""
     @Published private(set) var isChecking = false
+    @Published private(set) var hasCheckFailed = false
     @Published private(set) var downloadProgress: UpdateDownloadProgress?
     @Published private(set) var isRelaying = false
     @Published private(set) var waitingForInstallation = false
@@ -130,7 +131,7 @@ private struct GitHubLatestRelease: Decodable {
         if let wakeObserver { NSWorkspace.shared.notificationCenter.removeObserver(wakeObserver) }
         relayTask?.cancel()
     }
-    var displayedVersion: String { Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? L10n.text("开发构建") }
+    var displayedVersion: String { currentVersion == "0.0.0" ? L10n.text("开发构建") : currentVersion }
     var canInstall: Bool { candidateVersion != nil && !isChecking && !waitingForInstallation }
     var checkButtonTitle: String { isChecking ? L10n.text(downloadProgress == nil ? "检查中…" : "下载中…") : L10n.text("检查更新") }
     var canCheck: Bool { !isChecking && !waitingForInstallation && publicKey != nil && channel.configurationError == nil }
@@ -216,7 +217,7 @@ private struct GitHubLatestRelease: Decodable {
     }
     private func performCheck(manual: Bool = false) async {
         guard !isChecking, !waitingForInstallation, let publicKey, channel.configurationError == nil else { return }
-        isChecking = true; statusSource = L10n.snapshot("正在检查更新…")
+        isChecking = true; hasCheckFailed = false; statusSource = L10n.snapshot("正在检查更新…")
         if manual { emitLog(channel.isTest ? L10n.snapshot("开始手动检查独立测试更新") : L10n.snapshot("开始手动检查正式更新"), false) }
         var failed = false
         defer {
@@ -309,7 +310,7 @@ private struct GitHubLatestRelease: Decodable {
             if !manual { emitLog(L10n.snapshotFormat("已验证发行版 %@，更新已缓存", String(describing: version)), false) }
             beginRelay()
         } catch {
-            failed = true
+            failed = true; hasCheckFailed = true
             statusSource = L10n.snapshotCompose("检查或下载更新失败：%@", .snapshot(failureMessage(error)))
             state.schedule.failed(at: Date()); try? save()
             if !manual { emitLog(statusSource, true) }

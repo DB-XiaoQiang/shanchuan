@@ -64,3 +64,58 @@ struct UpdateInstallReadyView: View {
         }
     }
 }
+
+/// One primary action per stage; background work never presents an installation prompt.
+struct UpdateStatusPanel: View {
+    @ObservedObject private var appLanguage = AppLanguageStore.shared
+    @ObservedObject var updates: UpdateCoordinator
+    var enabled = true
+    private var title: String {
+        if updates.waitingForInstallation { return L10n.text("正在准备更新…") }
+        if updates.isChecking { return L10n.text(updates.downloadProgress == nil ? "正在检查更新…" : updates.downloadProgress?.isVerifying == true ? "正在校验更新…" : "正在下载更新…") }
+        if updates.canInstall { return L10n.text("更新已就绪") }
+        if updates.hasCheckFailed { return L10n.text("更新检查失败") }
+        return updates.status
+    }
+    var body: some View {
+        let _ = appLanguage.language
+        VStack(alignment: .leading, spacing: 9) {
+            HStack {
+                Image(systemName: updates.canInstall ? "arrow.down.circle.fill" : updates.hasCheckFailed ? "exclamationmark.triangle.fill" : "arrow.triangle.2.circlepath")
+                    .foregroundStyle(updates.canInstall ? Color.accentColor : updates.hasCheckFailed ? Color.orange : Color.secondary)
+                Text(title).font(.caption).fontWeight(.medium)
+                Spacer(minLength: 0)
+            }
+            Text(L10n.text("版本 ") + updates.displayedVersion).font(.caption2).foregroundStyle(.secondary)
+            if let progress = updates.downloadProgress {
+                UpdateDownloadProgressView(progress: progress)
+            } else if updates.isChecking || updates.waitingForInstallation {
+                ProgressView().progressViewStyle(.linear)
+            }
+            if updates.canInstall {
+                UpdateInstallReadyView(version: updates.candidateVersion ?? "", releaseNotes: updates.releaseNotes) {
+                    updates.requestInstall()
+                }.disabled(!enabled)
+            } else {
+                Button {
+                    if updates.hasCheckFailed { updates.retry() } else { updates.check() }
+                } label: {
+                    Text(updates.waitingForInstallation ? L10n.text("正在准备更新…") :
+                         updates.hasCheckFailed ? L10n.text("重试") : updates.checkButtonTitle)
+                        .frame(maxWidth: .infinity)
+                }.controlSize(.small).disabled(!enabled || !updates.canCheck)
+                    .accessibilityIdentifier("update-primary-action")
+            }
+            DisclosureGroup(L10n.text("更新详情")) {
+                ScrollView {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(updates.status).textSelection(.enabled)
+                    if let checked = updates.lastCheckCompletedAt { Text(L10n.text("最近检查：") + L10n.date(checked)) }
+                    if !updates.relayStatus.isEmpty { Text(updates.relayStatus) }
+                }.font(.caption2).foregroundStyle(.secondary).padding(.top, 4)
+                }.frame(maxHeight: 140)
+            }.font(.caption2)
+        }.padding(10).background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 9))
+            .accessibilityIdentifier("update-status-panel")
+    }
+}

@@ -484,3 +484,11 @@
 "更新说明" = "Release notes";
 "更新并重启" = "Update and restart";
 "点击后等待传输完成，再安装此版本并重启应用。" = "Wait for transfers to finish, then install this version and restart the app.";
+
+"暂无可用更新" = "No updates available";
+"正在准备更新…" = "Preparing update…";
+"更新已就绪" = "Update ready";
+"更新检查失败" = "Update check failed";
+"更新详情" = "Update details";
+"正在下载更新…" = "Downloading update…";
+"正在校验更新…" = "Verifying update…";

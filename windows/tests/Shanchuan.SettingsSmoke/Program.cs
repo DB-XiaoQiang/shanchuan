@@ -263,7 +263,7 @@ internal static class Program
                 Check(Localization.CurrentLanguage == language && window.Title == (english ? "Shanchuan" : "闪传"), "runtime-window-title-" + language);
                 Check(Title(window) == (english ? "Settings" : "配置中心"), "runtime-page-title-" + language);
                 Check(ReferenceEquals(page, Find<SettingsPage>(window, "SettingsPageRoot")) && ReferenceEquals(page.DataContext, viewModel) && ReferenceEquals(settings, viewModel.Settings), "runtime-same-page-model-and-settings-" + language);
-                Check(Find<Button>(window, "CheckUpdates").Content as string == (english ? "Check for updates / Retry" : "检查更新 / 重试"), "runtime-update-button-" + language);
+                Check(Find<Button>(window, "CheckUpdates").Content as string == (english ? "Check for updates" : "检查更新"), "runtime-update-button-" + language);
                 Check(editor.Title == (english ? "Directory exclusion rules" : "目录排除规则") && Find<Button>(editor, "CompleteDirectoryRules").Content as string == (english ? "Done" : "完成"), "runtime-existing-rules-window-" + language);
                 Check(rules.Text == draftRules && rules.SelectionStart == 20 && rules.SelectionLength == 12 && Math.Abs(rules.VerticalOffset - ruleOffset) < 1, "runtime-rules-text-selection-and-scroll-preserved-" + language);
                 Check(host.Text == "unsaved-draft.example.invalid" && (host.SelectionStart, host.SelectionLength) == hostSelection && port.Text == "invalid-number-draft" && Validation.GetHasError(port), "runtime-invalid-input-and-selection-preserved-" + language);
@@ -386,12 +386,16 @@ internal static class Program
             () => external, () => "synthetic-password", () => false, source: source,
             transport: new ForbiddenUpdateTransport(), clock: () => fixedNow);
         using var updates = new AppUpdateService(viewModel, root, coordinator);
+        Find<Expander>(window, "UpdateDetails").IsExpanded = true;
+        Pump();
         var status = Find<TextBlock>(window, "UpdateStatus");
         var checkedText = Find<TextBlock>(window, "UpdateLastChecked");
+        var summary = Find<TextBlock>(window, "UpdateSummary");
         // Retain the real production bindings, overriding only their inherited
         // source with an isolated service whose network ports are all fake.
         status.DataContext = new { Updates = updates };
         checkedText.DataContext = new { Updates = updates };
+        summary.DataContext = new { Updates = updates };
         try
         {
             var operation = updates.CheckAsync();
@@ -402,8 +406,8 @@ internal static class Program
             source.Response.SetResult(null);
             await operation;
             Pump();
-            Check(updates.CanCheck && checkedText.Text.Contains("暂无正式更新") && checkedText.Text.Contains("下载测试版"),
-                "no-stable-release-explains-manual-test-download");
+            Check(updates.CanCheck && checkedText.Text.Contains("暂无可用更新") && !checkedText.Text.Contains("测试版"),
+                "no-update-feedback-without-prerelease-download");
             Check(checkedText.Text.Contains("手动检查完成 ") && checkedText.Text.Contains(DateTime.Now.ToString("yyyy-MM-dd")),
                 "manual-check-shows-local-completion-time");
             var completedText = checkedText.Text;
@@ -424,9 +428,9 @@ internal static class Program
             await updates.CheckAsync();
             Pump();
             Check(checkedText.Text.Contains("synthetic-check-error"), "manual-check-preserves-readable-failure");
+            Check(summary.Text == "更新检查失败", "compact-summary-preserves-error-details-separately");
             Check(application.Windows.Count == 1, "manual-check-feedback-opens-no-dialog");
-            Check(updates.DownloadPageUrl == "https://github.com/DB-XiaoQiang/shanchuan/releases" &&
-                  updates.OpenDownloadsCommand.CanExecute(null), "download-entry-is-official-releases-page");
+            Check(!Children(window).OfType<Button>().Any(button => AutomationProperties.GetAutomationId(button) == "OpenUpdateDownloads"), "no-prerelease-download-entry");
             updates.Dispose();
             var requests = source.Requests;
             await updates.CheckAsync();
@@ -436,6 +440,7 @@ internal static class Program
         {
             status.ClearValue(FrameworkElement.DataContextProperty);
             checkedText.ClearValue(FrameworkElement.DataContextProperty);
+            summary.ClearValue(FrameworkElement.DataContextProperty);
         }
     }
 
@@ -469,6 +474,7 @@ internal static class Program
                 Pump();
             }
             Publish(new UpdateDownloadProgress(256 * 1024, 1024 * 1024, "synthetic-package.nupkg"), false);
+            Check(updates.CheckButtonVisibility == Visibility.Visible, "single-check-action-during-download");
             foreach (var selected in new[] { "en", "zh-Hans" })
             {
                 Localization.Configure(selected); Pump();
@@ -478,6 +484,7 @@ internal static class Program
                 Check(!install.IsVisible || !install.IsEnabled, "unverified-download-never-installs-" + selected);
             }
             Publish(new UpdateDownloadProgress(1024 * 1024, 1024 * 1024, "", IsVerified: true), true);
+            Check(updates.CheckButtonVisibility == Visibility.Collapsed && Find<Button>(window, "CheckUpdates").Visibility == Visibility.Collapsed, "ready-hides-duplicate-check-action");
             foreach (var selected in new[] { "en", "zh-Hans" })
             {
                 Localization.Configure(selected); Pump();

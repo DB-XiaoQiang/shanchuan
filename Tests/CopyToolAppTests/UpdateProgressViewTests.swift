@@ -5,6 +5,38 @@ import CopyToolCore
 @testable import CopyToolApp
 
 final class UpdateProgressViewTests: XCTestCase {
+    @MainActor func testCompactPanelDisplaysIdleAndFailureWithoutStartingInstall() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let coordinator = UpdateCoordinator(root: root, currentVersion: "0.2.4", publicKey: "synthetic",
+            dataLoader: { _, _ in throw UpdateHTTPFailure.status(403) })
+        var installs = 0
+        coordinator.install = { _ in installs += 1; return true }
+        for state in ["idle", "failure"] {
+            if state == "failure" {
+                await coordinator.checkNow()
+                XCTAssertTrue(coordinator.hasCheckFailed)
+                XCTAssertTrue(coordinator.canCheck)
+                XCTAssertFalse(coordinator.canInstall)
+                XCTAssertTrue(coordinator.status.contains("403"))
+            }
+            let view = NSHostingView(rootView: UpdateStatusPanel(updates: coordinator).padding(10).frame(width: 190)
+                .background(Color(nsColor: .windowBackgroundColor)))
+            let size = view.fittingSize
+            XCTAssertEqual(size.width, 190, accuracy: 1)
+            XCTAssertLessThan(size.height, 240)
+            view.frame = NSRect(origin: .zero, size: size); view.layoutSubtreeIfNeeded()
+            if let directory = ProcessInfo.processInfo.environment["SHANCHUAN_UI_EVIDENCE_DIR"] {
+                let bitmap = try XCTUnwrap(view.bitmapImageRepForCachingDisplay(in: view.bounds))
+                view.cacheDisplay(in: view.bounds, to: bitmap)
+                let url = URL(fileURLWithPath: directory, isDirectory: true)
+                try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+                try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
+                    .write(to: url.appendingPathComponent("update-panel-\(state).png"))
+            }
+        }
+        XCTAssertEqual(installs, 0)
+    }
     @MainActor func testProgressAndReadyFitNarrowSidebarInBothLanguagesWithoutInstalling() throws {
         let suite = "shanchuan-progress-ui." + UUID().uuidString
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite)), previous = L10n.language

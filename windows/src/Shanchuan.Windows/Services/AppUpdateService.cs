@@ -1,5 +1,4 @@
 using System.IO;
-using System.Diagnostics;
 using System.Reflection;
 using System.Security.Cryptography;
 using System.Text.Json;
@@ -76,15 +75,16 @@ public sealed class AppUpdateService : ObservableObject, IDisposable
             ? L.F($"手动检查完成 {checkedAt:yyyy-MM-dd HH:mm:ss}\n{_lastManualCheckResult}")
             : L.T("尚未手动检查");
     public string CheckButtonText => _snapshot.Download is { IsVerified: false } && _coordinator.IsBusy
-        ? L.T("正在下载 / 验证…") : _manualChecking ? L.T("正在检查…") : L.T("检查更新 / 重试");
-    public string DownloadPageUrl => "https://github.com/DB-XiaoQiang/shanchuan/releases";
-    public RelayCommand OpenDownloadsCommand => _openDownloadsCommand ??= new RelayCommand(_ => OpenDownloads(), _ => !_disposed);
-    private RelayCommand? _openDownloadsCommand;
+        ? L.T("正在下载 / 验证…") : _manualChecking ? L.T("正在检查…") : Status.StartsWith(L.T("检查失败："), StringComparison.Ordinal) ? L.T("重试") : L.T("检查更新");
+    public Visibility CheckButtonVisibility => _snapshot.CanInstall || _authorized is not null || _installing ? Visibility.Collapsed : Visibility.Visible;
+    public string SummaryStatus => _authorized is not null || _installing ? L.T("正在准备更新…") :
+        _snapshot.CanInstall ? L.T("更新已就绪") :
+        Status.StartsWith(L.T("检查失败："), StringComparison.Ordinal) ? L.T("更新检查失败") : Status;
     public string RelayStatus => _coordinator.Snapshot.RelayStatus;
     public string ReleaseNotes => _snapshot.ReleaseNotes;
     public bool CanCheck => !_disposed && !_ticking && !_requesting && !_installing && !_coordinator.IsBusy && _authorized is null;
     public bool CanInstall => !_disposed && _snapshot.CanInstall && !_requesting && !_installing && _authorized is null;
-    public string InstallButtonText => L.T("更新并重启");
+    public string InstallButtonText => _authorized is not null || _installing || _requesting ? L.T("正在准备更新…") : L.T("更新并重启");
     public Visibility InstallButtonVisibility => _snapshot.CanInstall ? Visibility.Visible : Visibility.Collapsed;
 
     public void Start()
@@ -134,17 +134,6 @@ public sealed class AppUpdateService : ObservableObject, IDisposable
 
     public Task CheckAsync() => CanCheck ? TickAsync(manual: true) : Task.CompletedTask;
     public Task RetryAsync() => CheckAsync();
-
-    private void OpenDownloads()
-    {
-        try { Process.Start(new ProcessStartInfo(DownloadPageUrl) { UseShellExecute = true }); }
-        catch (Exception error)
-        {
-            var message = L.M("无法打开下载页：") + ReadableError(error);
-            SetInstallationStatus(message);
-            _owner.ReportUpdateMessage(message, error: true);
-        }
-    }
 
     public async Task RequestInstallAsync(Window owner)
     {
@@ -247,7 +236,7 @@ public sealed class AppUpdateService : ObservableObject, IDisposable
     private static LocalizedText DescribeManualResult(UpdateSnapshot snapshot, LocalizedText liveStatus)
     {
         if (snapshot.Status == L.T("当前无正式更新"))
-            return L.M("暂无正式更新；测试版请点“下载测试版”手动下载安装。");
+            return L.M("暂无可用更新");
         if (snapshot.Status == L.T("当前无内网更新"))
             return L.M("FTP 中暂无可用的正式更新。");
         if (snapshot.Status == L.T("请先选择网络位置"))
@@ -383,7 +372,7 @@ public sealed class AppUpdateService : ObservableObject, IDisposable
         if (_disposed) return;
         if (!_dispatcher.CheckAccess()) { _dispatcher.BeginInvoke(new Action(NotifyState)); return; }
         foreach (var property in new[] { nameof(CurrentVersion), nameof(CurrentVersionText), nameof(CandidateVersion), nameof(Status), nameof(RelayStatus),
-            nameof(LastCheckedText), nameof(CheckButtonText), nameof(DownloadPercent), nameof(DownloadProgressText),
+            nameof(LastCheckedText), nameof(CheckButtonText), nameof(CheckButtonVisibility), nameof(SummaryStatus), nameof(DownloadPercent), nameof(DownloadProgressText),
             nameof(DownloadProgressVisibility), nameof(CandidateVersionText), nameof(InstallHint),
             nameof(ReleaseNotes), nameof(CanCheck), nameof(CanInstall), nameof(InstallButtonText), nameof(InstallButtonVisibility) })
             OnPropertyChanged(property);

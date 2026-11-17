@@ -306,7 +306,7 @@ final class UpdateCoordinatorTests: XCTestCase {
         let coordinator = UpdateCoordinator(root: root, currentVersion: "0.3.0", publicKey: sample.key,
             dataLoader: { _, _ in throw UpdateHTTPFailure.status(404) })
         await coordinator.checkNow()
-        XCTAssertEqual(coordinator.status, "暂无正式更新；测试版请手动下载")
+        XCTAssertEqual(coordinator.status, "暂无可用更新")
         XCTAssertFalse(coordinator.canInstall)
         let bytes = try Data(contentsOf: root.appendingPathComponent("Updates/state.json"))
         let persisted = try JSONDecoder().decode(UpdatePersistentState.self, from: bytes)
@@ -325,8 +325,8 @@ final class UpdateCoordinatorTests: XCTestCase {
         let firstCompletion = try XCTUnwrap(coordinator.lastCheckCompletedAt)
         XCTAssertEqual(logs.count, 2, "一次手动检查应各记录一次开始和完成")
         XCTAssertTrue(logs.allSatisfy { !$0.1 })
-        XCTAssertTrue(try XCTUnwrap(logs.last).0.contains("暂无正式更新"))
-        XCTAssertTrue(try XCTUnwrap(logs.last).0.contains("测试版请手动下载"))
+        XCTAssertTrue(try XCTUnwrap(logs.last).0.contains("暂无可用更新"))
+        XCTAssertFalse(try XCTUnwrap(logs.last).0.contains("测试版"))
         XCTAssertFalse(coordinator.canInstall)
         XCTAssertTrue(coordinator.canCheck)
 
@@ -359,7 +359,7 @@ final class UpdateCoordinatorTests: XCTestCase {
             try await Task.sleep(nanoseconds: 10_000_000)
         }
         XCTAssertNotNil(coordinator.lastCheckCompletedAt)
-        XCTAssertEqual(coordinator.status, "暂无正式更新；测试版请手动下载")
+        XCTAssertEqual(coordinator.status, "暂无可用更新")
         XCTAssertTrue(logs.isEmpty, "后台无正式版本不应记录手动检查日志")
         XCTAssertEqual(installs, 0)
         XCTAssertFalse(coordinator.waitingForInstallation)
