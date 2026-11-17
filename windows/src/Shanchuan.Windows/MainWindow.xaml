@@ -28,7 +28,7 @@
                             <TextBlock AutomationProperties.AutomationId="UpdateStatus" Text="{Binding Updates.Status}" TextWrapping="Wrap" Foreground="#475467" FontSize="12" Margin="0,5,0,0" />
                             <TextBlock Text="{Binding Updates.RelayStatus}" TextWrapping="Wrap" Foreground="#667085" FontSize="11" Margin="0,4,0,0" />
                             <StackPanel Visibility="{Binding Updates.DownloadProgressVisibility}" Margin="0,8,0,0">
-                                <ProgressBar AutomationProperties.AutomationId="UpdateDownloadProgress" Minimum="0" Maximum="100" Height="5" Value="{Binding Updates.DownloadPercent}" />
+                                <ProgressBar AutomationProperties.AutomationId="UpdateDownloadProgress" Minimum="0" Maximum="100" Height="5" Value="{Binding Updates.DownloadPercent, Mode=OneWay}" />
                                 <TextBlock AutomationProperties.AutomationId="UpdateDownloadBytes" Text="{Binding Updates.DownloadProgressText}" TextWrapping="Wrap" FontSize="11" Foreground="#475467" Margin="0,4,0,0" />
                             </StackPanel>
                             <StackPanel Visibility="{Binding Updates.InstallButtonVisibility}" Margin="0,7,0,0">
