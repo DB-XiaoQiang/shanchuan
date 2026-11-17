@@ -15,6 +15,7 @@
 "%@快捷键已取消：前台应用已切换" = "%@ shortcut cancelled: the frontmost app changed";
 "%@快捷键已取消：目标或录制状态已改变" = "%@ shortcut cancelled: the target or recording state changed";
 "%@快捷键已取消：请松开修饰键后重试" = "%@ shortcut cancelled: release the modifier keys and try again";
+"%@快捷键已取消：请松开快捷键后重试" = "%@ shortcut cancelled: release all shortcut keys and try again";
 "%@快捷键已被其他应用或系统占用，请换一个组合" = "The %@ shortcut is already in use by another app or the system. Choose a different combination.";
 "%@快捷键未执行：请在系统设置的辅助功能中允许闪传" = "%@ shortcut not performed: allow Shanchuan in System Settings > Accessibility";
 "%@快捷键未执行：辅助功能权限未授权" = "%@ shortcut not performed: Accessibility access has not been granted";
@@ -471,3 +472,4 @@
 "，未发送" = "; not sent";
 "，粘贴 " = ", Paste ";
 "；FTP 密码恢复失败，请重新检查密码" = "; the FTP password could not be restored. Check the password again.";
+"无法启动输入保护，请检查辅助功能权限后重试" = "Input protection could not start. Check Accessibility permissions and try again.";

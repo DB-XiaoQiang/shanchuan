@@ -4,6 +4,21 @@ import CopyToolCore
 
 @main enum RegistrationProbe {
     @MainActor static func main() throws {
+        if CommandLine.arguments.dropFirst().contains("--resource-smoke") {
+            let resources = URL(fileURLWithPath: CommandLine.arguments[0]).deletingLastPathComponent()
+                .appendingPathComponent("CopyTool_CopyToolCore.bundle")
+            guard let resourceRoot = Bundle(url: resources)?.resourceURL else {
+                preconditionFailure("Staged shortcut probe resource bundle is missing")
+            }
+            for (locale, expected) in [("zh-Hans", "复制"), ("en", "Copy")] {
+                let bundle = Bundle(url: resourceRoot.appendingPathComponent(locale + ".lproj"))
+                precondition(bundle?.localizedString(forKey: "复制", value: nil, table: "Localizable") == expected,
+                             "Staged shortcut probe resources are incomplete")
+            }
+            precondition(["复制", "Copy"].contains(L10n.text("复制")))
+            print("PASS native shortcut probe links and loads both language resources; no application, hotkeys, input, clipboard or FTP")
+            return
+        }
         _ = NSApplication.shared
         for keyCode in [CGKeyCode(kVK_ANSI_C), CGKeyCode(kVK_ANSI_V)] {
             guard let events = GlobalCopyPasteShortcuts.makeCommandEvents(keyCode: keyCode) else {

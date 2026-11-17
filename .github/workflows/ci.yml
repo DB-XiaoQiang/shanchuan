@@ -29,6 +29,8 @@ jobs:
         run: python3 -m unittest discover -s Tests/Release -p 'test_*.py'
       - name: 测试
         run: swift test
+      - name: 快捷键诊断工具编译与双语资源验证（不注册快捷键）
+        run: Tests/GlobalShortcuts/run.sh --resource-smoke
       - name: FTP 回环集成测试
         run: |
           python3 Tests/Transfer/mock_ftp.py

@@ -4,7 +4,8 @@ import Carbon
 import CopyToolCore
 import OSLog
 
-/// Registers only the configured combinations. There is no global keyboard monitor or event tap.
+/// Registers only the configured combinations. An explicit command temporarily guards input events;
+/// it never reads typed characters or keeps a background keyboard monitor.
 /// The synthetic command goes to the application that was frontmost when the shortcut was pressed.
 @MainActor final class GlobalCopyPasteShortcuts {
     private enum Action: String {
@@ -95,7 +96,7 @@ import OSLog
 
     private struct CopyDispatchBaseline {
         let changeCount: Int
-        let inputCounters: [UInt32]
+        let inputGeneration: UInt64
     }
 
     private static let signature: OSType = 0x43545053 // CTPS
@@ -114,6 +115,8 @@ import OSLog
     private var recordingShortcut = false
     private var pendingCommand: Task<Void, Never>?
     private var pendingCommandID: UUID?
+    private var activeInputGuard: ShortcutInputGuard?
+    private var pressedInputGuards: [UInt32: ShortcutInputGuard] = [:]
 
     init(onStatus: @escaping (String) -> Void, onCopyReady: @escaping (Int) -> Void = { _ in },
          onLocalizedStatus: ((L10n.Snapshot) -> Void)? = nil) {
@@ -234,7 +237,8 @@ import OSLog
                 }
                 let service = Unmanaged<GlobalCopyPasteShortcuts>.fromOpaque(context).takeUnretainedValue()
                 return MainActor.assumeIsolated {
-                    service.receiveHotKey(id: hotKeyID.id, released: GetEventKind(event) == UInt32(kEventHotKeyReleased))
+                    service.receiveHotKey(id: hotKeyID.id,
+                        released: GetEventKind(event) == UInt32(kEventHotKeyReleased), eventTime: GetEventTime(event))
                 }
             }, eventTypes.count, &eventTypes, Unmanaged.passUnretained(self).toOpaque(), &handler)
             guard status == noErr else {
@@ -254,11 +258,15 @@ import OSLog
         }
     }
 
-    private func receiveHotKey(id: UInt32, released: Bool) -> OSStatus {
+    private func receiveHotKey(id: UInt32, released: Bool, eventTime: EventTime) -> OSStatus {
         guard actions[id] != nil, !recordingShortcut else { return OSStatus(eventNotHandledErr) }
+        let keyCode = registrations.first(where: { $0.value.id == id }).map { CGKeyCode($0.key.keyCode) }
+        logInputState(phase: released ? "carbon-released" : "carbon-pressed", keyCode: keyCode, eventTime: eventTime)
         if released {
             finishHotKey(id: id)
         } else if releases.press(id: id, target: NSWorkspace.shared.frontmostApplication?.processIdentifier), let action = actions[id] {
+            activeInputGuard?.invalidate()
+            prepareInputGuard(id: id)
             logger.info("Carbon hotkey received: id=\(id, privacy: .public) action=\(action.rawValue, privacy: .public)")
         }
         return noErr
@@ -276,6 +284,8 @@ import OSLog
         guard let pair = registrations.first(where: { $0.key.matches(event) }),
               let action = actions[pair.value.id] else { return event }
         if !event.isARepeat, releases.press(id: pair.value.id, target: NSWorkspace.shared.frontmostApplication?.processIdentifier) {
+            activeInputGuard?.invalidate()
+            prepareInputGuard(id: pair.value.id)
             logger.info("Local hotkey received: id=\(pair.value.id, privacy: .public) action=\(action.rawValue, privacy: .public)")
         }
         return nil
@@ -285,22 +295,38 @@ import OSLog
     /// mistaken for a later user command; never redirect it to a different application.
     private func finishHotKey(id: UInt32) {
         guard let originalPID = releases.release(id: id) else { return }
-        guard let action = actions[id] else { return }
+        let protection = pressedInputGuards.removeValue(forKey: id)
+        guard let action = actions[id] else { protection?.stop(); return }
         guard NSWorkspace.shared.frontmostApplication?.processIdentifier == originalPID else {
+            protection?.stop()
             reportNotPerformed(L10n.snapshot("快捷键已取消：按键期间前台应用已切换"), action: action, target: nil)
             return
         }
-        perform(action)
+        let keyCode = registrations.first(where: { $0.value.id == id }).map { CGKeyCode($0.key.keyCode) }
+        perform(action, releaseKeyCode: keyCode, preparedProtection: protection, requiresPreparedProtection: true)
     }
 
-    private func perform(_ action: Action) {
+    /// Arm at key-down so the release handler never opens a new observation window.
+    private func prepareInputGuard(id: UInt32) {
+        pressedInputGuards.removeValue(forKey: id)?.stop()
+        let protection = ShortcutInputGuard(syntheticMarker: Self.syntheticEventMarker)
+        let isLocal = NSWorkspace.shared.frontmostApplication?.processIdentifier == ProcessInfo.processInfo.processIdentifier
+        guard protection.start(localOnly: isLocal) else { protection.stop(); return }
+        pressedInputGuards[id] = protection
+    }
+
+    private func perform(_ action: Action, releaseKeyCode: CGKeyCode? = nil,
+                         preparedProtection: ShortcutInputGuard? = nil, requiresPreparedProtection: Bool = false) {
         guard pendingCommand == nil, !recordingShortcut else {
+            preparedProtection?.stop()
             logger.notice("Shortcut skipped: command pending or shortcut recording active")
             reportNotPerformed(L10n.snapshotCompose("%@操作未执行：请等待当前操作或录制结束", .snapshot(L10n.snapshot(action.rawValue))), action: action, target: nil)
             return
         }
-        let requestInputCounters = Self.newInputCounters()
+        let requestTime = GetCurrentEventTime()
+        logInputState(phase: "request", keyCode: releaseKeyCode)
         guard let target = NSWorkspace.shared.frontmostApplication, !target.isTerminated else {
+            preparedProtection?.stop()
             logger.notice("Shortcut cancelled: no running frontmost application")
             reportNotPerformed(L10n.snapshotCompose("%@操作已取消：没有可用的前台应用", .snapshot(L10n.snapshot(action.rawValue))), action: action, target: nil)
             return
@@ -313,22 +339,42 @@ import OSLog
         let postEventAccess = CGPreflightPostEventAccess()
         logger.info("Permission preflight: AXIsProcessTrusted=\(accessibilityTrusted, privacy: .public) CGPreflightPostEventAccess=\(postEventAccess, privacy: .public)")
         guard isLocal || accessibilityTrusted else {
+            preparedProtection?.stop()
             logger.error("Shortcut denied: Accessibility permission missing; pid=\(pid, privacy: .public)")
             reportNotPerformed(L10n.snapshotCompose("%@快捷键未执行：请在系统设置的辅助功能中允许闪传", .snapshot(L10n.snapshot(action.rawValue))), action: action, target: target)
             return
         }
+        let protection = preparedProtection ?? ShortcutInputGuard(syntheticMarker: Self.syntheticEventMarker)
+        // Keep this observation's original generation; never authorize a new
+        // baseline after startup or when the shortcut is released.
+        let requestInputGeneration: UInt64 = 0
+        let started = preparedProtection != nil || (!requiresPreparedProtection && protection.start(localOnly: isLocal))
+        guard started, protection.isUnchanged(since: requestInputGeneration) else {
+            protection.stop()
+            reportNotPerformed(L10n.snapshot("无法启动输入保护，请检查辅助功能权限后重试"), action: action, target: target)
+            return
+        }
+        activeInputGuard = protection
         let commandID = UUID()
         pendingCommandID = commandID
         pendingCommand = Task { @MainActor [weak self] in
             guard let self else { return }
             defer {
+                protection.stop()
+                if self.activeInputGuard === protection { self.activeInputGuard = nil }
                 if self.pendingCommandID == commandID {
                     self.pendingCommand = nil
                     self.pendingCommandID = nil
                 }
             }
             let modifiers: CGEventFlags = [.maskCommand, .maskAlternate, .maskControl, .maskShift, .maskSecondaryFn]
-            // Releasing the configured modifiers prevents Option/Control/Shift from altering Cmd+C/V.
+            func shortcutReleased() -> Bool {
+                Self.shortcutKeysReleased(
+                    mainKeyDown: releaseKeyCode.map { CGEventSource.keyState(.hidSystemState, key: $0) } ?? false,
+                    flags: CGEventSource.flagsState(.hidSystemState))
+            }
+            // Carbon may report the combination released when a modifier lifts while C/V remains down.
+            // Wait for both the configured main key and modifiers, keeping the original input baseline.
             // A timeout cancels the action without activating or delivering input to another window.
             for _ in 0..<120 {
                 guard !Task.isCancelled, !self.recordingShortcut else {
@@ -341,16 +387,17 @@ import OSLog
                     self.reportNotPerformed(L10n.snapshotCompose("%@快捷键已取消：前台应用已切换", .snapshot(L10n.snapshot(action.rawValue))), action: action, target: target)
                     return
                 }
-                if CGEventSource.flagsState(.hidSystemState).intersection(modifiers).isEmpty { break }
+                if shortcutReleased() { break }
                 do { try await Task.sleep(nanoseconds: 25_000_000) } catch {
                     self.logger.info("Shortcut cancelled while waiting for modifier release; pid=\(pid, privacy: .public)")
                     self.reportNotPerformed(L10n.snapshotCompose("%@操作已取消", .snapshot(L10n.snapshot(action.rawValue))), action: action, target: target)
                     return
                 }
             }
-            guard CGEventSource.flagsState(.hidSystemState).intersection(modifiers).isEmpty else {
-                self.logger.notice("Shortcut cancelled: modifier release timeout; pid=\(pid, privacy: .public)")
-                self.reportNotPerformed(L10n.snapshotCompose("%@快捷键已取消：请松开修饰键后重试", .snapshot(L10n.snapshot(action.rawValue))), action: action, target: target)
+            guard shortcutReleased() else {
+                self.logInputState(phase: "release-timeout", keyCode: releaseKeyCode)
+                self.logger.notice("Shortcut cancelled: full shortcut release timeout; pid=\(pid, privacy: .public)")
+                self.reportNotPerformed(L10n.snapshotCompose("%@快捷键已取消：请松开快捷键后重试", .snapshot(L10n.snapshot(action.rawValue))), action: action, target: target)
                 return
             }
             guard !Task.isCancelled, !self.recordingShortcut,
@@ -359,25 +406,25 @@ import OSLog
                 self.reportNotPerformed(L10n.snapshotCompose("%@快捷键已取消：目标或录制状态已改变", .snapshot(L10n.snapshot(action.rawValue))), action: action, target: target)
                 return
             }
-            guard Self.newInputCounters() == requestInputCounters else {
-                let observedCounters = Self.newInputCounters().description
-                let initialCounters = requestInputCounters.description
-                self.logger.notice("Shortcut input counters changed: initial=\(initialCounters, privacy: .public) observed=\(observedCounters, privacy: .public)")
-                self.logger.notice("Shortcut cancelled: new physical operation while waiting for modifier release")
+            guard protection.isUnchanged(since: requestInputGeneration) else {
+                let elapsed = GetCurrentEventTime() - requestTime
+                self.logger.notice("Shortcut input protection invalidated before dispatch; elapsed=\(elapsed, privacy: .public)")
+                self.logInputState(phase: "input-changed-before-dispatch", keyCode: releaseKeyCode)
                 self.reportNotPerformed(L10n.snapshot("等待快捷键释放期间检测到新的操作"), action: action, target: target)
                 return
             }
+            self.logInputState(phase: "fully-released", keyCode: releaseKeyCode)
             if isLocal {
                 let selector = NSSelectorFromString(action == .copy ? "copy:" : "paste:")
-                let copyBaseline = action == .copy ? Self.captureCopyDispatchBaseline() : nil
-                guard (copyBaseline?.inputCounters ?? Self.newInputCounters()) == requestInputCounters else {
+                let copyBaseline = action == .copy ? Self.captureCopyDispatchBaseline(protection: protection) : nil
+                guard (copyBaseline?.inputGeneration ?? protection.snapshot) == requestInputGeneration else {
                     self.reportNotPerformed(L10n.snapshot("复制前检测到新的操作"), action: action, target: target)
                     return
                 }
                 let handled = NSApp.sendAction(selector, to: nil, from: self)
                 self.logger.info("Local responder dispatch: action=\(action.rawValue, privacy: .public) handled=\(handled, privacy: .public)")
                 if handled && action == .copy {
-                    await self.confirmCopyReady(baseline: copyBaseline, target: target, commandID: commandID)
+                    await self.confirmCopyReady(baseline: copyBaseline, target: target, commandID: commandID, protection: protection)
                 } else if handled {
                     self.report(L10n.snapshotCompose("已向当前输入框发送%@操作", .snapshot(L10n.snapshot(action.rawValue))), target: target)
                 } else {
@@ -396,18 +443,18 @@ import OSLog
             self.logger.info("Accessibility permission confirmed; pid=\(pid, privacy: .public)")
             var menuCopyBaseline: CopyDispatchBaseline?
             let menuResult = self.performMenuCommand(action, target: target, willDispatch: {
-                if action == .copy { menuCopyBaseline = Self.captureCopyDispatchBaseline() }
-                return (menuCopyBaseline?.inputCounters ?? Self.newInputCounters()) == requestInputCounters
+                if action == .copy { menuCopyBaseline = Self.captureCopyDispatchBaseline(protection: protection) }
+                return (menuCopyBaseline?.inputGeneration ?? protection.snapshot) == requestInputGeneration
             }) {
                 !Task.isCancelled && !self.recordingShortcut && self.isAccessibilityTrusted
                     && NSWorkspace.shared.frontmostApplication?.processIdentifier == pid && !target.isTerminated
                     && CGEventSource.flagsState(.hidSystemState).intersection(modifiers).isEmpty
-                    && Self.newInputCounters() == requestInputCounters
+                    && protection.isUnchanged(since: requestInputGeneration)
             }
             switch menuResult {
             case .success:
                 if action == .copy {
-                    await self.confirmCopyReady(baseline: menuCopyBaseline, target: target, commandID: commandID)
+                    await self.confirmCopyReady(baseline: menuCopyBaseline, target: target, commandID: commandID, protection: protection)
                 } else {
                     self.report(L10n.snapshotCompose("已执行%@操作", .snapshot(L10n.snapshot(action.rawValue))), target: target)
                 }
@@ -438,12 +485,12 @@ import OSLog
                 self.reportNotPerformed(L10n.snapshotCompose("无法生成%@按键，请重试", .snapshot(L10n.snapshot(action.rawValue))), action: action, target: target)
                 return
             }
-            guard Self.newInputCounters() == requestInputCounters else {
+            guard protection.isUnchanged(since: requestInputGeneration) else {
                 self.reportNotPerformed(L10n.snapshot("发送按键前检测到新的操作"), action: action, target: target)
                 return
             }
-            let keyboardCopyBaseline = action == .copy ? Self.captureCopyDispatchBaseline() : nil
-            guard (keyboardCopyBaseline?.inputCounters ?? Self.newInputCounters()) == requestInputCounters else {
+            let keyboardCopyBaseline = action == .copy ? Self.captureCopyDispatchBaseline(protection: protection) : nil
+            guard (keyboardCopyBaseline?.inputGeneration ?? protection.snapshot) == requestInputGeneration else {
                 self.reportNotPerformed(L10n.snapshot("发送按键前检测到新的操作"), action: action, target: target)
                 return
             }
@@ -452,7 +499,7 @@ import OSLog
             // Posting alone is insufficient: require a fresh clipboard update in the same
             // bounded window with no intervening physical input or application switch.
             if action == .copy {
-                await self.confirmCopyReady(baseline: keyboardCopyBaseline, target: target, commandID: commandID)
+                await self.confirmCopyReady(baseline: keyboardCopyBaseline, target: target, commandID: commandID, protection: protection)
             } else {
                 self.report(L10n.snapshotCompose("已发送%@按键", .snapshot(L10n.snapshot(action.rawValue))), target: target)
             }
@@ -628,25 +675,47 @@ import OSLog
         return current != baseline ? .ready : .unchanged
     }
 
-    /// Counts new physical operations without observing key values or contents. Key-up and flags are
-    /// deliberately excluded: finishing the custom shortcut's normal release must not cancel its copy.
+    /// Diagnostic only: WindowServer activity counters can lag actual events.
+    /// They must never authorize command dispatch or clipboard sending.
     private static func newInputCounters() -> [UInt32] {
         let types: [CGEventType] = [.keyDown, .leftMouseDown, .rightMouseDown, .otherMouseDown, .scrollWheel]
         return types.map { CGEventSource.counterForEventType(.hidSystemState, eventType: $0) }
     }
 
-    private static func captureCopyDispatchBaseline() -> CopyDispatchBaseline {
-        let counters = newInputCounters()
-        return CopyDispatchBaseline(changeCount: NSPasteboard.general.changeCount, inputCounters: counters)
+    /// A Carbon hotkey-release notification alone does not prove that the main key is up.
+    nonisolated static func shortcutKeysReleased(mainKeyDown: Bool, flags: CGEventFlags) -> Bool {
+        let modifiers: CGEventFlags = [.maskCommand, .maskAlternate, .maskControl, .maskShift, .maskSecondaryFn]
+        return !mainKeyDown && flags.intersection(modifiers).isEmpty
+    }
+
+    /// Only samples the configured shortcut and aggregate counters. Never observes other key codes or text.
+    private func logInputState(phase: String, keyCode: CGKeyCode?, eventTime: EventTime? = nil) {
+        let countersBefore = Self.newInputCounters()
+        let timeBefore = GetCurrentEventTime()
+        let keyDownAge = CGEventSource.secondsSinceLastEventType(.hidSystemState, eventType: .keyDown)
+        let timeAfter = GetCurrentEventTime()
+        let countersAfter = Self.newInputCounters()
+        let keyIsDown = keyCode.map { CGEventSource.keyState(.hidSystemState, key: $0) } ?? false
+        let flags = CGEventSource.flagsState(.hidSystemState).rawValue
+        let sample = "phase=\(phase) eventTime=\(eventTime.map(String.init(describing:)) ?? "none") "
+            + "time=[\(timeBefore),\(timeAfter)] keyDownAge=\(keyDownAge) "
+            + "mainKeyDown=\(keyIsDown) flags=\(flags) countersBefore=\(countersBefore) countersAfter=\(countersAfter)"
+        logger.notice("Shortcut timing: \(sample, privacy: .public)")
+    }
+
+    private static func captureCopyDispatchBaseline(protection: ShortcutInputGuard) -> CopyDispatchBaseline? {
+        guard let generation = protection.snapshot else { return nil }
+        return CopyDispatchBaseline(changeCount: NSPasteboard.general.changeCount, inputGeneration: generation)
     }
 
     /// A dispatched copy gets a bounded window for asynchronous clipboard writes.
     /// Any new physical operation or target change closes the window; posting alone never sends.
-    private func confirmCopyReady(baseline: CopyDispatchBaseline?, target: NSRunningApplication, commandID: UUID) async {
+    private func confirmCopyReady(baseline: CopyDispatchBaseline?, target: NSRunningApplication,
+                                  commandID: UUID, protection: ShortcutInputGuard) async {
         let deadline = ContinuousClock.now.advanced(by: .seconds(1))
         while ContinuousClock.now < deadline {
             // Check physical operations before considering a new clipboard counter, including when both changed.
-            let inputChanged = baseline.map { $0.inputCounters != Self.newInputCounters() } ?? true
+            let inputChanged = baseline.map { !protection.isUnchanged(since: $0.inputGeneration) } ?? true
             let cancelled = Task.isCancelled || recordingShortcut || pendingCommandID != commandID
             let targetUnchanged = !target.isTerminated
                 && NSWorkspace.shared.frontmostApplication?.processIdentifier == target.processIdentifier
@@ -659,7 +728,7 @@ import OSLog
                 guard ContinuousClock.now < deadline, !Task.isCancelled, !recordingShortcut,
                       pendingCommandID == commandID, !target.isTerminated,
                       NSWorkspace.shared.frontmostApplication?.processIdentifier == target.processIdentifier,
-                      baseline?.inputCounters == Self.newInputCounters() else {
+                      baseline.map({ protection.isUnchanged(since: $0.inputGeneration) }) == true else {
                     reportNotPerformed(L10n.snapshot("复制确认已取消"), action: .copy, target: target)
                     return
                 }
@@ -706,6 +775,11 @@ import OSLog
 
     private func cancelPendingCommand() {
         if pendingCommand != nil { logger.info("Pending shortcut cancelled by registration lifecycle") }
+        activeInputGuard?.invalidate()
+        activeInputGuard?.stop()
+        activeInputGuard = nil
+        for protection in pressedInputGuards.values { protection.stop() }
+        pressedInputGuards.removeAll()
         pendingCommand?.cancel()
         pendingCommand = nil
         pendingCommandID = nil
