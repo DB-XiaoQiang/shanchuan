@@ -385,5 +385,7 @@
   "更新检查失败": "Update check failed",
   "更新详情": "Update details",
   "正在下载更新…": "Downloading update…",
-  "正在校验更新…": "Verifying update…"
+  "正在校验更新…": "Verifying update…",
+  "检查更新": "Check for updates",
+  "重试": "Retry"
 }
