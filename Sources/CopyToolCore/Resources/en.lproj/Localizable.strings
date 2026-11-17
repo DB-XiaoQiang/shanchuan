@@ -473,3 +473,14 @@
 "，粘贴 " = ", Paste ";
 "；FTP 密码恢复失败，请重新检查密码" = "; the FTP password could not be restored. Check the password again.";
 "无法启动输入保护，请检查辅助功能权限后重试" = "Input protection could not start. Check Accessibility permissions and try again.";
+
+"下载中…" = "Downloading…";
+"正在校验更新：%@" = "Verifying update: %@";
+"已下载 %@ / %@" = "Downloaded %@ / %@";
+"下载版本 %@" = "Downloading version %@";
+"更新下载进度" = "Update download progress";
+"正在校验更新，校验通过后即可安装" = "Verifying the update. Installation will be available after verification.";
+"更新至 %@，点击后安装并重启。" = "Update to %@. Click below to install and restart.";
+"更新说明" = "Release notes";
+"更新并重启" = "Update and restart";
+"点击后等待传输完成，再安装此版本并重启应用。" = "Wait for transfers to finish, then install this version and restart the app.";

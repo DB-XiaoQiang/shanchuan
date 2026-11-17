@@ -32,6 +32,7 @@ struct RootView: View {
                 Divider()
                 Text(L10n.text("版本 ") + updates.displayedVersion).font(.caption).foregroundStyle(.secondary)
                 Text(updates.status).font(.caption).textSelection(.enabled)
+                if let progress = updates.downloadProgress { UpdateDownloadProgressView(progress: progress) }
                 if let checkedAt = updates.lastCheckCompletedAt {
                     Text(L10n.text("最近检查：") + L10n.date(checkedAt))
                         .font(.caption2).foregroundStyle(.secondary)
@@ -44,8 +45,9 @@ struct RootView: View {
                 Link(model.runtimeProfile.isUpdateTest ? L10n.text("测试通道发布页") : L10n.text("测试版下载"), destination: model.runtimeProfile.downloadPage).font(.caption)
                     .help(L10n.text("打开 GitHub 安装包下载页，测试版需要手动安装"))
                 if updates.canInstall {
-                    Button(L10n.text("更新至 ") + (updates.candidateVersion ?? "")) { updates.requestInstall() }
-                        .buttonStyle(.borderedProminent).controlSize(.small)
+                    UpdateInstallReadyView(version: updates.candidateVersion ?? "", releaseNotes: updates.releaseNotes) {
+                        updates.requestInstall()
+                    }
                         .disabled(!model.runtimeProfile.updatesEnabled)
                 }
             }.padding()
@@ -100,7 +102,7 @@ struct RootView: View {
         } message: { Text(L10n.text("会删除本应用保存的文本和图片记录。原始文件不会删除。")) }
     }
     private var checkUpdatesButton: some View {
-        Button(updates.isChecking ? L10n.text("检查中…") : L10n.text("检查更新")) { updates.check() }
+        Button(updates.checkButtonTitle) { updates.check() }
             .disabled(!model.runtimeProfile.updatesEnabled || !updates.canCheck)
     }
     private var retryUpdateButton: some View {

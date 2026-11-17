@@ -5,6 +5,10 @@ namespace Shanchuan.Core.Tests;
 
 public sealed partial class FtpLoopbackTests
 {
+    private sealed class UpdateProgressCapture(Action<UpdateDownloadProgress> capture) : IProgress<UpdateDownloadProgress>
+    {
+        public void Report(UpdateDownloadProgress value) => capture(value);
+    }
     [Fact]
     public async Task UpdateRelayCommitsSignatureLastAndAllInternalPeersReadWithoutDeleting()
     {
@@ -23,8 +27,12 @@ public sealed partial class FtpLoopbackTests
         Assert.EndsWith("/update-manifest.sig", server.Uploads[7].RemotePath);
         Assert.NotEqual(server.Uploads[3].RemotePath, server.Uploads[7].RemotePath);
         var inner = Settings(server, NetworkMode.Internal);
+        var progress = new List<UpdateDownloadProgress>();
         var first = await transport.ReceiveAsync(new UpdateCache(Path.Combine(root.Path, "inner1"), fixture.Verifier), fixture.Verifier,
-            "0.3.0", inner, "fixture-password", default);
+            "0.3.0", inner, "fixture-password", default, new UpdateProgressCapture(progress.Add));
+        Assert.Contains(progress, item => item.DownloadedBytes > 0 && item.DownloadedBytes < item.TotalBytes);
+        Assert.True(progress.Last().IsVerified);
+        Assert.Equal(fixture.Manifest.WindowsUpdateAssets.Sum(x => x.Size), progress.Last().DownloadedBytes);
         var second = await transport.ReceiveAsync(new UpdateCache(Path.Combine(root.Path, "inner2"), fixture.Verifier), fixture.Verifier,
             "0.3.0", inner, "fixture-password", default);
         Assert.NotNull(first);

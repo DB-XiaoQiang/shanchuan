@@ -364,5 +364,19 @@
   "，清理警告 {0} 条": ", {0} cleanup warnings",
   "，目录排除 {0} 项": ", {0} directory items excluded",
   "；FTP 响应码 ": "; FTP response code ",
-  "；不表示内网已安装。": "; this does not mean internal computers have installed it."
+  "；不表示内网已安装。": "; this does not mean internal computers have installed it.",
+  "已下载 {0:0}% · {1} / {2}": "Downloaded {0:0}% · {1} / {2}",
+  "{0} / {1}": "{0} / {1}",
+  "{0} B": "{0} B",
+  "{0:0.0} KB": "{0:0.0} KB",
+  "{0:0.0} MB": "{0:0.0} MB",
+  "{0:0.0} GB": "{0:0.0} GB",
+  "下载及验证完成，可立即更新": "Download verified. Ready to update.",
+  "正在验证更新包…": "Verifying update…",
+  "正在下载更新包…": "Downloading update…",
+  "新版本 v{0}": "New version v{0}",
+  "点击后将等待传输完成，安装此版本并重新启动。": "Click to install this version and restart after transfers finish.",
+  "正在下载 / 验证…": "Downloading / Verifying…",
+  "更新说明": "Release notes",
+  "待安装版本已变化，请重新检查后再点击更新。": "The target version changed. Check again before clicking Update."
 }

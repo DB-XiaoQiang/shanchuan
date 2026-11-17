@@ -2,13 +2,21 @@ import AppKit
 import Combine
 import CopyToolCore
 
-private final class BoundedUpdateDownload: NSObject, URLSessionDownloadDelegate, @unchecked Sendable {
+final class BoundedUpdateDownload: NSObject, URLSessionDownloadDelegate, @unchecked Sendable {
     let maximum: Int64
-    init(maximum: Int64) { self.maximum = maximum }
+    private let progress: (@Sendable (Int64) -> Void)?
+    private var lastReport = -Double.infinity
+    init(maximum: Int64, progress: (@Sendable (Int64) -> Void)? = nil) {
+        self.maximum = maximum; self.progress = progress
+    }
     func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didFinishDownloadingTo location: URL) {}
     func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didWriteData bytesWritten: Int64,
                     totalBytesWritten: Int64, totalBytesExpectedToWrite: Int64) {
-        if totalBytesWritten > maximum || totalBytesExpectedToWrite > maximum { downloadTask.cancel() }
+        if totalBytesWritten > maximum || totalBytesExpectedToWrite > maximum { downloadTask.cancel(); return }
+        let now = ProcessInfo.processInfo.systemUptime
+        if totalBytesWritten == maximum || now - lastReport >= 0.1 {
+            lastReport = now; progress?(max(0, totalBytesWritten))
+        }
     }
 }
 
@@ -59,6 +67,7 @@ private struct GitHubLatestRelease: Decodable {
     @Published private(set) var candidateVersion: String?
     @Published private(set) var releaseNotes = ""
     @Published private(set) var isChecking = false
+    @Published private(set) var downloadProgress: UpdateDownloadProgress?
     @Published private(set) var isRelaying = false
     @Published private(set) var waitingForInstallation = false
     @Published private(set) var lastCheckCompletedAt: Date?
@@ -88,6 +97,8 @@ private struct GitHubLatestRelease: Decodable {
     private var enabled = false
     private let session: URLSession
     private let dataLoader: (@Sendable (URL, Int64) async throws -> Data)?
+    private let assetDownloader: (@Sendable (URL, Int64, @escaping @Sendable (Int64) -> Void) async throws -> URL)?
+    private var progressID: UUID?
     private let testUpload: (@Sendable (URL, String, FTPSettings) async throws -> Void)?
     private let relayQueue = DispatchQueue(label: "local.copytool.update-relay", qos: .utility)
     private var relayTask: Task<Void, Never>?
@@ -97,6 +108,7 @@ private struct GitHubLatestRelease: Decodable {
     init(root: URL? = nil, currentVersion: String? = nil, publicKey: String? = nil, session: URLSession? = nil,
          channel: UpdateChannel = .production,
          dataLoader: (@Sendable (URL, Int64) async throws -> Data)? = nil,
+         assetDownloader: (@Sendable (URL, Int64, @escaping @Sendable (Int64) -> Void) async throws -> URL)? = nil,
          upload: (@Sendable (URL, String, FTPSettings) async throws -> Void)? = nil) {
         self.root = (root ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("CopyToolIndependent")).appendingPathComponent("Updates", isDirectory: true)
@@ -104,7 +116,7 @@ private struct GitHubLatestRelease: Decodable {
         self.channel = channel
         self.publicKey = publicKey ?? Bundle.main.url(forResource: "update-public-key", withExtension: "pem").flatMap { try? String(contentsOf: $0, encoding: .utf8) }
         self.session = session ?? URLSession(configuration: .ephemeral)
-        self.dataLoader = dataLoader; self.testUpload = upload
+        self.dataLoader = dataLoader; self.assetDownloader = assetDownloader; self.testUpload = upload
         state = (try? Data(contentsOf: self.root.appendingPathComponent("state.json")))
             .flatMap { try? JSONDecoder().decode(UpdatePersistentState.self, from: $0) } ?? UpdatePersistentState()
         lastCheckCompletedAt = state.lastCheckCompletedAt
@@ -119,7 +131,8 @@ private struct GitHubLatestRelease: Decodable {
         relayTask?.cancel()
     }
     var displayedVersion: String { Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? L10n.text("开发构建") }
-    var canInstall: Bool { candidateVersion != nil && !waitingForInstallation }
+    var canInstall: Bool { candidateVersion != nil && !isChecking && !waitingForInstallation }
+    var checkButtonTitle: String { isChecking ? L10n.text(downloadProgress == nil ? "检查中…" : "下载中…") : L10n.text("检查更新") }
     var canCheck: Bool { !isChecking && !waitingForInstallation && publicKey != nil && channel.configurationError == nil }
     var isBusy: Bool { isRelaying || waitingForInstallation }
 
@@ -207,6 +220,7 @@ private struct GitHubLatestRelease: Decodable {
         if manual { emitLog(channel.isTest ? L10n.snapshot("开始手动检查独立测试更新") : L10n.snapshot("开始手动检查正式更新"), false) }
         var failed = false
         defer {
+            progressID = nil; downloadProgress = nil
             let completedAt = Date()
             lastCheckCompletedAt = completedAt
             state.lastCheckCompletedAt = completedAt
@@ -245,17 +259,48 @@ private struct GitHubLatestRelease: Decodable {
             }
             let directory = cacheDirectory(version: version, identity: verified.identity)
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
-            for asset in selectedAssets(verified) {
+            let assets = selectedAssets(verified)
+            let totalBytes = assets.reduce(Int64(0)) { $0 + $1.size }
+            var completedBytes: Int64 = 0
+            for asset in assets {
                 let destination = directory.appendingPathComponent(asset.name)
-                if (try? UpdateVerifier.verify(file: destination, asset: asset)) != nil { continue }
+                statusSource = L10n.snapshotFormat("正在校验更新：%@", asset.name)
+                downloadProgress = UpdateDownloadProgress(version: version, assetName: asset.name,
+                    downloadedBytes: completedBytes, totalBytes: totalBytes, isVerifying: true)
+                if (try? await Self.verifyAsset(destination, asset: asset)) != nil {
+                    completedBytes += asset.size
+                    downloadProgress = UpdateDownloadProgress(version: version, assetName: asset.name,
+                        downloadedBytes: completedBytes, totalBytes: totalBytes, isVerifying: true)
+                    continue
+                }
                 statusSource = L10n.snapshotFormat("正在下载更新：%@", String(describing: asset.name))
-                let temporary = try await download(base.appendingPathComponent(asset.name), maximum: asset.size)
+                downloadProgress = UpdateDownloadProgress(version: version, assetName: asset.name,
+                    downloadedBytes: completedBytes, totalBytes: totalBytes, isVerifying: false)
+                let id = UUID(), finished = completedBytes
+                progressID = id
+                let temporary = try await download(base.appendingPathComponent(asset.name), maximum: asset.size,
+                    progress: { [weak self] received in
+                        Task { @MainActor in
+                            guard let self, self.progressID == id else { return }
+                            let count = max(self.downloadProgress?.downloadedBytes ?? finished,
+                                            finished + min(asset.size, max(0, received)))
+                            self.downloadProgress = UpdateDownloadProgress(version: version, assetName: asset.name,
+                                downloadedBytes: count, totalBytes: totalBytes, isVerifying: false)
+                        }
+                    })
+                progressID = nil
                 defer { try? FileManager.default.removeItem(at: temporary) }
-                try UpdateVerifier.verify(file: temporary, asset: asset)
+                statusSource = L10n.snapshotFormat("正在校验更新：%@", asset.name)
+                downloadProgress = UpdateDownloadProgress(version: version, assetName: asset.name,
+                    downloadedBytes: completedBytes + asset.size, totalBytes: totalBytes, isVerifying: true)
+                try await Self.verifyAsset(temporary, asset: asset)
                 if FileManager.default.fileExists(atPath: destination.path) { try FileManager.default.removeItem(at: destination) }
                 try FileManager.default.moveItem(at: temporary, to: destination)
+                completedBytes += asset.size
             }
-            if channel.requiresWindowsAssets { try UpdateVerifier.verifyWindowsFeed(verified, directory: directory) }
+            if channel.requiresWindowsAssets {
+                try await Task.detached(priority: .utility) { try UpdateVerifier.verifyWindowsFeed(verified, directory: directory) }.value
+            }
             try bytes.write(to: directory.appendingPathComponent("update-manifest.json"), options: .atomic)
             try signature.write(to: directory.appendingPathComponent("update-manifest.sig"), options: .atomic)
             release = verified; state.candidateVersion = version; state.candidateIdentity = verified.identity; state.highestVersion = version
@@ -270,21 +315,26 @@ private struct GitHubLatestRelease: Decodable {
             if !manual { emitLog(statusSource, true) }
         }
     }
+    private nonisolated static func verifyAsset(_ file: URL, asset: ReleaseAsset) async throws {
+        try await Task.detached(priority: .utility) { try UpdateVerifier.verify(file: file, asset: asset) }.value
+    }
     private func fetch(_ url: URL, maximum: Int64) async throws -> Data {
         let file = try await download(url, maximum: maximum); defer { try? FileManager.default.removeItem(at: file) }
         return try Data(contentsOf: file)
     }
-    private func download(_ url: URL, maximum: Int64) async throws -> URL {
+    private func download(_ url: URL, maximum: Int64, progress: (@Sendable (Int64) -> Void)? = nil) async throws -> URL {
+        if let progress, let assetDownloader { return try await assetDownloader(url, maximum, progress) }
         if let dataLoader {
             let bytes = try await dataLoader(url, maximum)
             guard bytes.count <= maximum else { throw UpdateFailure.invalid(L10n.text("更新响应超过大小上限。")) }
             let temporary = root.appendingPathComponent(UUID().uuidString + ".download")
             try bytes.write(to: temporary, options: .atomic)
+            progress?(Int64(bytes.count))
             return temporary
         }
         var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 120)
         request.setValue("Shanchuan-Updater", forHTTPHeaderField: "User-Agent")
-        let delegate = BoundedUpdateDownload(maximum: maximum)
+        let delegate = BoundedUpdateDownload(maximum: maximum, progress: progress)
         let (file, response) = try await session.download(for: request, delegate: delegate)
         if let http = response as? HTTPURLResponse, http.statusCode != 200 {
             try? FileManager.default.removeItem(at: file)
@@ -314,7 +364,7 @@ private struct GitHubLatestRelease: Decodable {
             do {
                 while businessIsBusy() { try await Task.sleep(nanoseconds: 500_000_000) }
                 let directory = cacheDirectory(version: verified.manifest.version, identity: verified.identity)
-                try UpdateVerifier.verifyWindowsFeed(verified, directory: directory)
+                try await Task.detached(priority: .utility) { try UpdateVerifier.verifyWindowsFeed(verified, directory: directory) }.value
                 let assets = verified.manifest.assets.filter { $0.platform == "windows" && $0.arch == "x64" && ["velopack-full", "velopack-feed"].contains($0.kind) }
                 let names = assets.map(\.name) + ["update-manifest.json", "update-manifest.sig"]
                 let batch = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
@@ -354,20 +404,18 @@ private struct GitHubLatestRelease: Decodable {
         else if let release { showCandidate(release) }
     }
     func requestInstall() {
-        guard let version = candidateVersion, let verified = release, !waitingForInstallation else { return }
-        let alert = NSAlert()
-        alert.messageText = channel.isTest ? L10n.format("更新“闪传更新测试”到 %@？", String(describing: version)) : L10n.format("更新闪传到 %@？", String(describing: version))
-        alert.informativeText = releaseNotes + (channel.isTest
-            ? L10n.text("\n仅替换独立测试应用；正式闪传、配置和 FTP 不受影响。确认后安装并重启测试应用。")
-            : L10n.text("\n将等待普通传输和更新转发结束后安装并重启。"))
-        alert.addButton(withTitle: L10n.text("更新")); alert.addButton(withTitle: L10n.text("稍后"))
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        // The explicit “Update and restart” click is approval for this exact
+        // verified version and identity, never for a later discovered release.
+        guard canInstall, let version = candidateVersion, let verified = release,
+              verified.manifest.version == version else { return }
         waitingForInstallation = true; statusSource = L10n.snapshot("已确认，等待传输完成后更新")
         Task {
             while businessIsBusy() || isRelaying || isChecking { try? await Task.sleep(nanoseconds: 500_000_000) }
             do {
                 let directory = cacheDirectory(version: version, identity: verified.identity)
-                for asset in selectedAssets(verified) { try UpdateVerifier.verify(file: directory.appendingPathComponent(asset.name), asset: asset) }
+                for asset in selectedAssets(verified) { try await Self.verifyAsset(directory.appendingPathComponent(asset.name), asset: asset) }
+                // Transfers may have started while checksums ran off the UI thread.
+                while businessIsBusy() || isRelaying || isChecking { try await Task.sleep(nanoseconds: 500_000_000) }
                 installationMayBegin?()
                 if install?(version) != true { waitingForInstallation = false }
             } catch { statusSource = L10n.snapshotCompose("安装前验证失败：%@", .snapshot(failureMessage(error))); waitingForInstallation = false }

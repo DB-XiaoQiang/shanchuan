@@ -255,4 +255,176 @@ final class LocalizedUpdateUserDriverTests: XCTestCase {
         XCTAssertNoThrow(try AppUpdater.validateTarget(actual: "0.2.1", approved: "0.2.1"))
         XCTAssertThrowsError(try AppUpdater.validateTarget(actual: "0.2.2", approved: "0.2.1"))
     }
+    @MainActor func testApprovedVersionAutomaticallyAcceptsFoundAndReadyWithoutFurtherButtons() {
+        let ui = RecordingUpdatePresenter()
+        let driver = LocalizedUpdateUserDriver(language: .english, applicationName: "Shanchuan",
+            approvedVersion: "0.2.4", presenter: ui)
+        var checkCancelled = 0, downloadCancelled = 0
+        var found: [SPUUserUpdateChoice] = [], ready: [SPUUserUpdateChoice] = []
+        driver.showUserInitiatedUpdateCheck(cancellation: { checkCancelled += 1 })
+        let obsoleteCheckCancel = ui.secondary
+        driver.showFound(version: "0.2.4", informationOnly: false, stage: .notDownloaded, reply: { found.append($0) })
+        XCTAssertEqual(found, [.install])
+        XCTAssertTrue(driver.hasAutomaticInstallationApproval)
+        XCTAssertNil(ui.primary)
+        XCTAssertNil(ui.secondary)
+        obsoleteCheckCancel?()
+        XCTAssertEqual(checkCancelled, 0)
+        driver.showDownloadInitiated(cancellation: { downloadCancelled += 1 })
+        let obsoleteDownloadCancel = ui.secondary
+        driver.showDownloadDidStartExtractingUpdate()
+        driver.showReady(toInstallAndRelaunch: { ready.append($0) })
+        XCTAssertEqual(ready, [.install])
+        XCTAssertFalse(driver.hasAutomaticInstallationApproval)
+        XCTAssertNil(ui.primary, "the already-approved Ready step must not show another install button")
+        XCTAssertNil(ui.secondary)
+        XCTAssertFalse(driver.presentation.allowsClose)
+        obsoleteDownloadCancel?()
+        driver.performPrimary(); driver.performSecondary(); driver.performClose()
+        XCTAssertEqual(downloadCancelled, 0)
+        XCTAssertEqual(found, [.install]); XCTAssertEqual(ready, [.install])
+    }
+
+    @MainActor func testApprovedFlowRejectsWrongVersionAndInformationOnlyUpdates() {
+        for (version, informationOnly, stage) in [
+            ("0.2.5", false, SPUUserUpdateStage.notDownloaded),
+            ("0.2.3", false, .downloaded),
+            ("0.2.4", true, .installing),
+            ("", false, .notDownloaded)
+        ] {
+            let ui = RecordingUpdatePresenter()
+            let driver = LocalizedUpdateUserDriver(language: .english, applicationName: "Shanchuan",
+                approvedVersion: "0.2.4", presenter: ui)
+            var choices: [SPUUserUpdateChoice] = []
+            driver.showFound(version: version, informationOnly: informationOnly, stage: stage, reply: { choices.append($0) })
+            XCTAssertEqual(choices, [stage == .installing ? .skip : .dismiss])
+            XCTAssertFalse(driver.hasAutomaticInstallationApproval)
+            driver.showReady(toInstallAndRelaunch: { choices.append($0) })
+            driver.performPrimary()
+            XCTAssertEqual(choices.filter { $0 == .install }.count, 0)
+            XCTAssertNil(ui.primary)
+        }
+    }
+
+    @MainActor func testApprovedReadyRequiresMatchingFoundAndCannotAcquireAuthorizationLater() {
+        let ui = RecordingUpdatePresenter()
+        let driver = LocalizedUpdateUserDriver(language: .english, applicationName: "Shanchuan",
+            approvedVersion: "0.2.4", presenter: ui)
+        var choices: [SPUUserUpdateChoice] = []
+        driver.showReady(toInstallAndRelaunch: { choices.append($0) })
+        XCTAssertEqual(choices, [.skip])
+        driver.showFound(version: "0.2.4", informationOnly: false, stage: .downloaded, reply: { choices.append($0) })
+        driver.showReady(toInstallAndRelaunch: { choices.append($0) })
+        XCTAssertEqual(choices.filter { $0 == .install }.count, 0)
+        XCTAssertFalse(driver.hasAutomaticInstallationApproval)
+    }
+
+    @MainActor func testRepeatedFoundAndReadyCannotApproveTwice() {
+        let foundDriver = LocalizedUpdateUserDriver(language: .english, applicationName: "Shanchuan",
+            approvedVersion: "0.2.4", presenter: RecordingUpdatePresenter())
+        var found: [SPUUserUpdateChoice] = []
+        foundDriver.showFound(version: "0.2.4", informationOnly: false, stage: .notDownloaded, reply: { found.append($0) })
+        foundDriver.showFound(version: "0.2.4", informationOnly: false, stage: .downloaded, reply: { found.append($0) })
+        foundDriver.showReady(toInstallAndRelaunch: { found.append($0) })
+        XCTAssertEqual(found.filter { $0 == .install }.count, 1)
+        XCTAssertFalse(foundDriver.hasAutomaticInstallationApproval)
+
+        let readyDriver = LocalizedUpdateUserDriver(language: .english, applicationName: "Shanchuan",
+            approvedVersion: "0.2.4", presenter: RecordingUpdatePresenter())
+        readyDriver.showFound(version: "0.2.4", informationOnly: false, stage: .downloaded, reply: { _ in })
+        var ready: [SPUUserUpdateChoice] = []
+        readyDriver.showReady(toInstallAndRelaunch: { choice in
+            ready.append(choice)
+            // Re-enter synchronously, before the first SDK reply returns.
+            readyDriver.showReady(toInstallAndRelaunch: { ready.append($0) })
+        })
+        readyDriver.showReady(toInstallAndRelaunch: { ready.append($0) })
+        XCTAssertEqual(ready.filter { $0 == .install }.count, 1)
+        XCTAssertFalse(readyDriver.hasAutomaticInstallationApproval)
+    }
+
+    @MainActor func testApprovedCheckAndDownloadCancellationRevokeTheEntireCycle() {
+        for downloading in [false, true] {
+            let ui = RecordingUpdatePresenter()
+            let driver = LocalizedUpdateUserDriver(language: .english, applicationName: "Shanchuan",
+                approvedVersion: "0.2.4", presenter: ui)
+            var cancelled = 0, choices: [SPUUserUpdateChoice] = []
+            if downloading {
+                driver.showFound(version: "0.2.4", informationOnly: false, stage: .notDownloaded, reply: { _ in })
+                driver.showDownloadInitiated(cancellation: { cancelled += 1 })
+            } else {
+                driver.showUserInitiatedUpdateCheck(cancellation: { cancelled += 1 })
+            }
+            let cancel = ui.secondary, close = ui.closed
+            cancel?(); close?(); cancel?()
+            XCTAssertEqual(cancelled, 1)
+            XCTAssertFalse(driver.hasAutomaticInstallationApproval)
+            driver.showReady(toInstallAndRelaunch: { choices.append($0) })
+            driver.showFound(version: "0.2.4", informationOnly: false, stage: .downloaded, reply: { choices.append($0) })
+            XCTAssertEqual(choices.filter { $0 == .install }.count, 0)
+        }
+    }
+
+    @MainActor func testErrorsNotFoundCompletionDismissalAndExplicitRevocationBlockLateReady() {
+        for terminal in ["error", "notFound", "finished", "relaunched", "dismissed", "revoked"] {
+            let ui = RecordingUpdatePresenter()
+            let driver = LocalizedUpdateUserDriver(language: .english, applicationName: "Shanchuan",
+                approvedVersion: "0.2.4", presenter: ui)
+            driver.showFound(version: "0.2.4", informationOnly: false, stage: .notDownloaded, reply: { _ in })
+            switch terminal {
+            case "error": driver.showUpdaterError(NSError(domain: "fixture", code: 1), acknowledgement: {})
+            case "notFound": driver.showUpdateNotFoundWithError(NSError(domain: "fixture", code: 1), acknowledgement: {})
+            case "finished": driver.showUpdateInstalledAndRelaunched(false, acknowledgement: {})
+            case "relaunched": driver.showUpdateInstalledAndRelaunched(true, acknowledgement: {})
+            case "dismissed": driver.dismissUpdateInstallation()
+            default: driver.revokeInstallationApproval()
+            }
+            let staleAction = ui.primary
+            XCTAssertFalse(driver.hasAutomaticInstallationApproval, terminal)
+            var choices: [SPUUserUpdateChoice] = []
+            driver.showReady(toInstallAndRelaunch: { choices.append($0) })
+            driver.showFound(version: "0.2.4", informationOnly: false, stage: .installing, reply: { choices.append($0) })
+            staleAction?(); ui.primary?()
+            XCTAssertEqual(choices.filter { $0 == .install }.count, 0, terminal)
+        }
+    }
+
+    @MainActor func testLanguageChangesNeverConsumeOrReacquireAutomaticApproval() {
+        let suite = "shanchuan-approved-language." + UUID().uuidString
+        let defaults = UserDefaults(suiteName: suite)!, previous = L10n.language
+        defer { L10n.setLanguage(previous, defaults: defaults); defaults.removePersistentDomain(forName: suite) }
+        L10n.setLanguage(.simplifiedChinese, defaults: defaults)
+        let ui = RecordingUpdatePresenter()
+        let driver = LocalizedUpdateUserDriver(language: .simplifiedChinese, applicationName: "闪传",
+            approvedVersion: "0.2.4", presenter: ui)
+        var choices: [SPUUserUpdateChoice] = []
+        driver.showUserInitiatedUpdateCheck(cancellation: {})
+        L10n.setLanguage(.english, defaults: defaults)
+        XCTAssertTrue(choices.isEmpty)
+        XCTAssertTrue(driver.hasAutomaticInstallationApproval)
+        driver.showFound(version: "0.2.4", informationOnly: false, stage: .notDownloaded, reply: { choices.append($0) })
+        driver.showDownloadInitiated(cancellation: {})
+        L10n.setLanguage(.simplifiedChinese, defaults: defaults)
+        L10n.setLanguage(.english, defaults: defaults)
+        XCTAssertEqual(choices, [.install])
+        XCTAssertTrue(driver.hasAutomaticInstallationApproval)
+        driver.showReady(toInstallAndRelaunch: { choices.append($0) })
+        XCTAssertEqual(choices, [.install, .install])
+        XCTAssertFalse(driver.hasAutomaticInstallationApproval)
+        L10n.setLanguage(.simplifiedChinese, defaults: defaults)
+        driver.performPrimary(); driver.performSecondary(); driver.performClose()
+        XCTAssertEqual(choices, [.install, .install])
+        XCTAssertFalse(driver.hasAutomaticInstallationApproval)
+    }
+
+    @MainActor func testInformationOnlyCannotBecomeInstallableThroughLateReadyWithoutApproval() {
+        let ui = RecordingUpdatePresenter()
+        let driver = LocalizedUpdateUserDriver(language: .english, applicationName: "Shanchuan", presenter: ui)
+        var choices: [SPUUserUpdateChoice] = []
+        driver.showFound(version: "0.2.4", informationOnly: true, stage: .notDownloaded, reply: { choices.append($0) })
+        driver.showReady(toInstallAndRelaunch: { choices.append($0) })
+        driver.performPrimary()
+        XCTAssertEqual(choices, [.skip])
+    }
+
 }

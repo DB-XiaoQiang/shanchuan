@@ -69,6 +69,7 @@ internal static class Program
                 RunAssertions(application, window, viewModel, settingsStore, credentials, output);
                 RunDirectoryRulesAssertions(application, window, viewModel, settingsStore, output);
                 await RunUpdateFeedbackAssertionsAsync(application, window, viewModel, dataRoot);
+                AssertUpdateDownloadPresentation(application, window, viewModel);
                 RunLanguageAssertions(application, window, viewModel, settingsStore, credentials, output);
                 File.WriteAllText(Path.Combine(output, "settings-smoke-report.json"), JsonSerializer.Serialize(new
                 {
@@ -435,6 +436,69 @@ internal static class Program
         {
             status.ClearValue(FrameworkElement.DataContextProperty);
             checkedText.ClearValue(FrameworkElement.DataContextProperty);
+        }
+    }
+
+    private static void AssertUpdateDownloadPresentation(Application application, MainWindow window, AppViewModel viewModel)
+    {
+        // Drive the actual production bindings with synthetic byte snapshots only.
+        // No Start(), download, FTP, Velopack or install action is executed here.
+        const BindingFlags hidden = BindingFlags.NonPublic | BindingFlags.Instance;
+        var updates = viewModel.Updates;
+        var coordinator = (UpdateCoordinator)typeof(AppUpdateService).GetField("_coordinator", hidden)!.GetValue(updates)!;
+        var coreSnapshot = typeof(UpdateCoordinator).GetField("_snapshot", hidden)!;
+        var coreStatus = typeof(UpdateCoordinator).GetField("_status", hidden)!;
+        var uiSnapshot = typeof(AppUpdateService).GetField("_snapshot", hidden)!;
+        var changed = typeof(AppUpdateService).GetMethod("OnCoordinatorChanged", hidden)!;
+        var savedCore = coreSnapshot.GetValue(coordinator);
+        var savedStatus = coreStatus.GetValue(coordinator);
+        var savedUI = uiSnapshot.GetValue(updates);
+        var language = Localization.CurrentLanguage;
+        var progress = Find<ProgressBar>(window, "UpdateDownloadProgress");
+        var bytes = Find<TextBlock>(window, "UpdateDownloadBytes");
+        var install = Find<Button>(window, "InstallUpdateNow");
+        try
+        {
+            void Publish(UpdateDownloadProgress value, bool ready)
+            {
+                var snapshot = new UpdateSnapshot(AppUpdateService.InstalledVersion, "9.8.7", "", "", !ready, ready,
+                    "Synthetic release notes; no application will be installed.", value);
+                coreSnapshot.SetValue(coordinator, snapshot);
+                coreStatus.SetValue(coordinator, Localization.M(ready ? "下载及验证完成，可立即更新" : "正在下载更新包…"));
+                changed.Invoke(updates, [snapshot]);
+                Pump();
+            }
+            Publish(new UpdateDownloadProgress(256 * 1024, 1024 * 1024, "synthetic-package.nupkg"), false);
+            foreach (var selected in new[] { "en", "zh-Hans" })
+            {
+                Localization.Configure(selected); Pump();
+                Check(progress.IsVisible && Math.Abs(progress.Value - 25) < 0.001, "update-download-progress-25-" + selected);
+                Check(bytes.Text.Contains("25%") && bytes.Text.Contains("256.0 KB / 1.0 MB"), "update-byte-count-" + selected);
+                Check(bytes.Text.StartsWith(selected == "en" ? "Downloaded" : "已下载"), "update-progress-live-language-" + selected);
+                Check(!install.IsVisible || !install.IsEnabled, "unverified-download-never-installs-" + selected);
+            }
+            Publish(new UpdateDownloadProgress(1024 * 1024, 1024 * 1024, "", IsVerified: true), true);
+            foreach (var selected in new[] { "en", "zh-Hans" })
+            {
+                Localization.Configure(selected); Pump();
+                Check(progress.Value == 100 && bytes.Text.Contains("100%"), "verified-download-complete-" + selected);
+                Check(install.IsVisible && install.IsEnabled && install.Content as string == (selected == "en" ? "Update and restart" : "更新并重启"),
+                    "one-click-update-label-" + selected);
+                Check(Find<TextBlock>(window, "UpdateTargetVersion").Text.Contains("9.8.7"), "one-click-target-before-consent-" + selected);
+                var notes = Find<Expander>(window, "UpdateReleaseNotes"); notes.IsExpanded = true; Pump();
+                Check(notes.Header as string == (selected == "en" ? "Release notes" : "更新说明"), "one-click-notes-header-" + selected);
+                Check(updates.ReleaseNotes.Contains("Synthetic release notes"), "one-click-notes-before-consent-" + selected);
+                Check(ReferenceEquals(progress, Find<ProgressBar>(window, "UpdateDownloadProgress")), "update-progress-control-survives-language-switch-" + selected);
+            }
+        }
+        finally
+        {
+            coreSnapshot.SetValue(coordinator, savedCore);
+            coreStatus.SetValue(coordinator, savedStatus);
+            uiSnapshot.SetValue(updates, savedUI);
+            Localization.Configure(language);
+            typeof(AppUpdateService).GetMethod("NotifyState", hidden)!.Invoke(updates, null);
+            Pump();
         }
     }
 

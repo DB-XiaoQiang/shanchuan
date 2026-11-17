@@ -17,7 +17,7 @@ public sealed class UpdateState
 }
 
 public sealed record UpdateSnapshot(string CurrentVersion, string? CandidateVersion, string Status,
-    string RelayStatus, bool IsWorking, bool CanInstall, string ReleaseNotes);
+    string RelayStatus, bool IsWorking, bool CanInstall, string ReleaseNotes, UpdateDownloadProgress? Download = null);
 
 public static class UpdateSchedule
 {
@@ -51,6 +51,8 @@ public sealed class UpdateCoordinator : IDisposable
     private readonly CancellationTokenSource _lifetime = new();
     private VerifiedUpdate? _candidate;
     private DateTimeOffset? _lastInternalPoll;
+    private UpdateDownloadProgress? _download;
+    private volatile bool _acquiringCandidate;
     private bool _loaded;
     private bool _disposed;
     private LocalizedText _status = L.M("等待检查更新");
@@ -136,12 +138,14 @@ public sealed class UpdateCoordinator : IDisposable
                     await RelayAsync(settings, password, now, token).ConfigureAwait(false);
             }
         }
-        catch (OperationCanceledException) when (token.IsCancellationRequested) { }
+        catch (OperationCanceledException) when (token.IsCancellationRequested) { _download = null; _status = L.M("检查已取消，请重试。"); }
         finally { Publish(false); _serial.Release(); }
     }
 
     private async Task CheckExternalAsync(string window, AppSettings settings, string password, DateTimeOffset now, CancellationToken token)
     {
+        _acquiringCandidate = true;
+        _download = null;
         _status = L.M("检查中");
         Publish(true);
         try
@@ -155,7 +159,8 @@ public sealed class UpdateCoordinator : IDisposable
                 _status = L.M("下载中");
                 Publish(true);
                 _candidate = await _cache.ImportAsync(release.ManifestBytes, release.Signature,
-                    (asset, destination, ct) => _source.DownloadAssetAsync(release.Tag, asset, destination, ct), token).ConfigureAwait(false);
+                    (asset, destination, bytes, ct) => _source.DownloadAssetAsync(release.Tag, asset, destination, ct, bytes),
+                    new InlineProgress<UpdateDownloadProgress>(OnDownloadProgress), token).ConfigureAwait(false);
                 AcceptCandidate(_candidate);
                 _status = ReadyStatus();
             }
@@ -165,20 +170,25 @@ public sealed class UpdateCoordinator : IDisposable
         }
         catch (Exception error) when (error is not OperationCanceledException)
         {
+            _download = null;
             _status = L.M("检查失败：") + SafeError(error, settings, password);
             CheckFailed(now);
             Log?.Invoke(_status);
         }
+        finally { _acquiringCandidate = false; Publish(true); }
     }
 
     private async Task ReceiveInternalAsync(AppSettings settings, string password, DateTimeOffset now, CancellationToken token)
     {
+        _acquiringCandidate = true;
+        _download = null;
         _status = L.M("检查中");
         Publish(true);
         try
         {
             var minimum = _candidate?.Manifest.Version ?? _currentVersion;
-            var candidate = await _relay.ReceiveAsync(_cache, _verifier, minimum, settings, password, token).ConfigureAwait(false);
+            var candidate = await _relay.ReceiveAsync(_cache, _verifier, minimum, settings, password, token,
+                new InlineProgress<UpdateDownloadProgress>(OnDownloadProgress)).ConfigureAwait(false);
             if (candidate is not null)
             {
                 RequireNotOlder(candidate.Manifest.Version);
@@ -191,10 +201,12 @@ public sealed class UpdateCoordinator : IDisposable
         }
         catch (Exception error) when (error is not OperationCanceledException)
         {
+            _download = null;
             _status = L.M("检查失败：") + SafeError(error, settings, password);
             CheckFailed(now);
             Log?.Invoke(_status);
         }
+        finally { _acquiringCandidate = false; Publish(true); }
     }
 
     private async Task RelayAsync(AppSettings settings, string password, DateTimeOffset now, CancellationToken token)
@@ -231,12 +243,13 @@ public sealed class UpdateCoordinator : IDisposable
 
     public VerifiedUpdate? GetCandidateForInstall()
     {
+        if (_acquiringCandidate) return null;
         var path = _candidate?.CacheDirectory ?? State.CandidateCacheDirectory;
         if (path is null) return null;
         var verified = Task.Run(() => _cache.LoadAsync(path)).GetAwaiter().GetResult();
         if (UpdateManifestVerifier.CompareVersions(verified.Manifest.Version, _currentVersion) <= 0) return null;
+        if (_acquiringCandidate) return null;
         RequireNotOlder(verified.Manifest.Version);
-        _candidate = verified;
         return verified;
     }
 
@@ -268,11 +281,18 @@ public sealed class UpdateCoordinator : IDisposable
         Save();
     }
     private void Save() => JsonFileStore.Write(_statePath, State);
+    private void OnDownloadProgress(UpdateDownloadProgress value)
+    {
+        _download = value;
+        _status = value.IsVerified ? L.M("下载及验证完成，可立即更新") : value.IsVerifying ? L.M("正在验证更新包…") : L.M("正在下载更新包…");
+        Publish(true);
+    }
     private void Publish(bool working)
     {
         Snapshot = new UpdateSnapshot(_currentVersion, _candidate?.Manifest.Version, _status, _relayStatus, working,
-            _candidate is not null && UpdateManifestVerifier.CompareVersions(_candidate.Manifest.Version, _currentVersion) > 0,
-            _candidate?.Manifest.ReleaseNotes ?? "");
+            _candidate is not null && !_acquiringCandidate && UpdateManifestVerifier.CompareVersions(_candidate.Manifest.Version, _currentVersion) > 0 &&
+                (_download is null || _download.IsVerified),
+            _candidate?.Manifest.ReleaseNotes ?? "", _download);
         if (!_disposed) Changed?.Invoke(Snapshot);
     }
     private static LocalizedText SafeError(Exception error, AppSettings settings, string password) => LocalizedText.Live(() =>

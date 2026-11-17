@@ -50,6 +50,27 @@ private actor UpdateFixtureRelay {
     func snapshot() -> ([String], [String]) { (names, destinations) }
 }
 
+private actor UpdateFixtureDownload {
+    let responses: [String: Data]
+    let root: URL
+    private var waiting: CheckedContinuation<Void, Never>?
+    private var released = false
+    private var lateProgress: (@Sendable (Int64) -> Void)?
+    init(responses: [String: Data], root: URL) { self.responses = responses; self.root = root }
+    func load(_ url: URL, maximum: Int64, progress: @escaping @Sendable (Int64) -> Void) async throws -> URL {
+        lateProgress = progress
+        progress(maximum / 2)
+        if !released { await withCheckedContinuation { waiting = $0 } }
+        let bytes = try XCTUnwrap(responses[url.lastPathComponent])
+        let file = root.appendingPathComponent(UUID().uuidString)
+        try bytes.write(to: file)
+        progress(Int64(bytes.count))
+        return file
+    }
+    func resume() { released = true; waiting?.resume(); waiting = nil }
+    func sendLateProgress() { lateProgress?(Int64.max) }
+}
+
 final class UpdateCoordinatorTests: XCTestCase {
     private struct Fixture {
         let key: String
@@ -57,8 +78,7 @@ final class UpdateCoordinatorTests: XCTestCase {
     }
     private func fixture(version: String = "0.4.0", prerelease: Bool = false, corruptPackage: Bool = false,
                          manifestChannel: String = "stable", tagPrefix: String = "v", macOnly: Bool = false,
-                         draft: Bool = false) throws -> Fixture {
-        let signingKey = P256.Signing.PrivateKey()
+                         draft: Bool = false, signingKey: P256.Signing.PrivateKey = .init()) throws -> Fixture {
         let package = Data("windows package".utf8), zip = Data("macos synthetic zip".utf8), appcast = Data("<rss/>".utf8)
         let fullName = "Shanchuan-\(version)-win-x64-full.nupkg"
         let feed = try JSONSerialization.data(withJSONObject: ["Assets": [["PackageId": "Shanchuan", "FileName": fullName,
@@ -94,6 +114,110 @@ final class UpdateCoordinatorTests: XCTestCase {
             try await Task.sleep(nanoseconds: 10_000_000)
         }
         XCTFail("合成更新转发未结束")
+    }
+    @MainActor func testDownloadStreamsAggregateProgressAndSingleClickWaitsForTransfers() async throws {
+        let sample = try fixture(), root = try temporaryRoot()
+        let network = UpdateFixtureNetwork(responses: sample.responses)
+        let downloader = UpdateFixtureDownload(responses: sample.responses, root: root)
+        let coordinator = UpdateCoordinator(root: root, currentVersion: "0.3.0", publicKey: sample.key,
+            dataLoader: { try await network.load($0, maximum: $1) },
+            assetDownloader: { try await downloader.load($0, maximum: $1, progress: $2) })
+        var installed: [String] = [], busy = true
+        coordinator.businessIsBusy = { busy }
+        coordinator.install = { installed.append($0); return true }
+        let check = Task { await coordinator.checkNow() }
+        for _ in 0..<100 {
+            if (coordinator.downloadProgress?.downloadedBytes ?? 0) > 0 { break }
+            try await Task.sleep(nanoseconds: 5_000_000)
+        }
+        let progress = try XCTUnwrap(coordinator.downloadProgress)
+        XCTAssertGreaterThan(progress.downloadedBytes, 0)
+        XCTAssertLessThan(progress.fraction, 1)
+        XCTAssertEqual(progress.version, "0.4.0")
+        XCTAssertEqual(progress.assetName, "Shanchuan-0.4.0-win-x64-full.nupkg")
+        XCTAssertFalse(progress.isVerifying)
+        XCTAssertFalse(coordinator.canInstall)
+        XCTAssertEqual(coordinator.checkButtonTitle, L10n.text("下载中…"))
+        coordinator.requestInstall()
+        XCTAssertTrue(installed.isEmpty)
+        await downloader.resume(); await check.value
+        XCTAssertNil(coordinator.downloadProgress)
+        XCTAssertTrue(coordinator.canInstall)
+        XCTAssertTrue(installed.isEmpty, "Finishing a download must not grant installation approval")
+        let status = coordinator.status
+        await downloader.sendLateProgress(); await Task.yield()
+        XCTAssertNil(coordinator.downloadProgress)
+        XCTAssertEqual(coordinator.status, status)
+        coordinator.requestInstall(); coordinator.requestInstall()
+        XCTAssertTrue(coordinator.waitingForInstallation)
+        XCTAssertTrue(installed.isEmpty, "The explicit click must still wait for ordinary transfers")
+        busy = false
+        for _ in 0..<100 {
+            if !installed.isEmpty { break }
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        XCTAssertEqual(installed, ["0.4.0"], "One click is bound to exactly one verified version")
+    }
+    @MainActor func testCachedCandidateCannotInstallWhileHigherVersionDownloadsAndFailureRetainsIt() async throws {
+        let key = P256.Signing.PrivateKey(), root = try temporaryRoot()
+        let old = try fixture(signingKey: key), oldNetwork = UpdateFixtureNetwork(responses: old.responses)
+        let first = UpdateCoordinator(root: root, currentVersion: "0.3.0", publicKey: old.key,
+            dataLoader: { try await oldNetwork.load($0, maximum: $1) })
+        await first.checkNow()
+        let newer = try fixture(version: "0.5.0", corruptPackage: true, signingKey: key)
+        let network = UpdateFixtureNetwork(responses: newer.responses)
+        let downloader = UpdateFixtureDownload(responses: newer.responses, root: root)
+        let coordinator = UpdateCoordinator(root: root, currentVersion: "0.3.0", publicKey: old.key,
+            dataLoader: { try await network.load($0, maximum: $1) },
+            assetDownloader: { try await downloader.load($0, maximum: $1, progress: $2) })
+        var installs = 0
+        coordinator.install = { _ in installs += 1; return true }
+        coordinator.start()
+        XCTAssertEqual(coordinator.candidateVersion, "0.4.0")
+        let check = Task { await coordinator.checkNow() }
+        for _ in 0..<100 {
+            if coordinator.downloadProgress != nil { break }
+            try await Task.sleep(nanoseconds: 5_000_000)
+        }
+        XCTAssertEqual(coordinator.downloadProgress?.version, "0.5.0")
+        XCTAssertFalse(coordinator.canInstall)
+        coordinator.requestInstall(); XCTAssertEqual(installs, 0)
+        await downloader.resume(); await check.value
+        XCTAssertNil(coordinator.downloadProgress)
+        XCTAssertEqual(coordinator.candidateVersion, "0.4.0")
+        XCTAssertTrue(coordinator.canInstall)
+        XCTAssertTrue(coordinator.status.contains("失败"))
+        await downloader.sendLateProgress(); await Task.yield()
+        XCTAssertNil(coordinator.downloadProgress)
+        XCTAssertEqual(installs, 0)
+    }
+    @MainActor func testVerifiedCachedWindowsFilesCountTowardProgressWithoutBeingDownloadedAgain() async throws {
+        let sample = try fixture(), root = try temporaryRoot()
+        let network = UpdateFixtureNetwork(responses: sample.responses)
+        let first = UpdateCoordinator(root: root, currentVersion: "0.3.0", publicKey: sample.key,
+            dataLoader: { try await network.load($0, maximum: $1) })
+        await first.checkNow()
+        let state = try JSONDecoder().decode(UpdatePersistentState.self, from: Data(contentsOf: root.appendingPathComponent("Updates/state.json")))
+        let identity = try XCTUnwrap(state.candidateIdentity)
+        let directory = root.appendingPathComponent("Updates/cache/0.4.0").appendingPathComponent(identity)
+        try FileManager.default.removeItem(at: directory.appendingPathComponent("Shanchuan-macos-arm64.zip"))
+        let downloader = UpdateFixtureDownload(responses: sample.responses, root: root)
+        let second = UpdateCoordinator(root: root, currentVersion: "0.3.0", publicKey: sample.key,
+            dataLoader: { try await network.load($0, maximum: $1) },
+            assetDownloader: { try await downloader.load($0, maximum: $1, progress: $2) })
+        let check = Task { await second.checkNow() }
+        for _ in 0..<100 {
+            if second.downloadProgress?.assetName == "Shanchuan-macos-arm64.zip" { break }
+            try await Task.sleep(nanoseconds: 5_000_000)
+        }
+        let progress = try XCTUnwrap(second.downloadProgress)
+        let windowsBytes = Int64(try XCTUnwrap(sample.responses["Shanchuan-0.4.0-win-x64-full.nupkg"]).count +
+                                 XCTUnwrap(sample.responses["releases.win-x64.json"]).count)
+        XCTAssertGreaterThanOrEqual(progress.downloadedBytes, windowsBytes)
+        XCTAssertFalse(second.canInstall)
+        await downloader.resume(); await check.value
+        XCTAssertTrue(second.canInstall)
+        XCTAssertNil(second.downloadProgress)
     }
     @MainActor func testVerifiedAutomaticDownloadDoesNotRequestInstallationAndRestoresAcrossRestart() async throws {
         let sample = try fixture(), root = try temporaryRoot(), network = UpdateFixtureNetwork(responses: sample.responses)

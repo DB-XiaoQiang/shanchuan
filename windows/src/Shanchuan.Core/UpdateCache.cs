@@ -10,15 +10,29 @@ public sealed class UpdateCache(string root, UpdateManifestVerifier verifier)
 
     public async Task<VerifiedUpdate> ImportAsync(byte[] bytes, byte[] signature,
         Func<UpdateAsset, string, CancellationToken, Task> download, CancellationToken token = default)
+        => await ImportAsync(bytes, signature, (asset, path, _, ct) => download(asset, path, ct), null, token);
+
+    public async Task<VerifiedUpdate> ImportAsync(byte[] bytes, byte[] signature,
+        Func<UpdateAsset, string, IProgress<long>?, CancellationToken, Task> download,
+        IProgress<UpdateDownloadProgress>? progress, CancellationToken token = default)
     {
         var manifest = verifier.Verify(bytes, signature);
         RequireWindowsAssets(manifest);
+        var assets = manifest.WindowsUpdateAssets;
+        var tracker = new UpdateDownloadTracker(assets, progress);
+        tracker.Report(-1, 0);
         var hash = Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
         var target = Path.Combine(Root, manifest.Version + "-" + hash);
         Directory.CreateDirectory(Root);
         if (Directory.Exists(target))
         {
-            try { return await LoadAsync(target, token); }
+            try
+            {
+                tracker.Report(-1, 0, verifying: true);
+                var cached = await LoadAsync(target, token);
+                tracker.Complete();
+                return cached;
+            }
             catch (Exception error) when (error is IOException or InvalidDataException or JsonException or CryptographicException)
             { Directory.Delete(target, true); }
         }
@@ -26,16 +40,21 @@ public sealed class UpdateCache(string root, UpdateManifestVerifier verifier)
         Directory.CreateDirectory(staging);
         try
         {
-            foreach (var asset in manifest.WindowsUpdateAssets)
+            for (var index = 0; index < assets.Count; index++)
             {
+                var asset = assets[index];
+                var currentIndex = index;
+                tracker.Report(index, 0);
                 var destination = Path.Combine(staging, asset.Name);
-                await download(asset, destination, token);
+                await download(asset, destination, new InlineProgress<long>(count => tracker.Report(currentIndex, count)), token);
+                tracker.Report(index, new FileInfo(destination).Length, verifying: true);
                 await UpdateManifestVerifier.VerifyAssetAsync(destination, asset, token);
             }
             ValidateWindowsFeed(staging, manifest);
             await File.WriteAllBytesAsync(Path.Combine(staging, UpdateManifestVerifier.ManifestName), bytes, token);
             await File.WriteAllBytesAsync(Path.Combine(staging, UpdateManifestVerifier.SignatureName), signature, token);
             Directory.Move(staging, target);
+            tracker.Complete();
             return new VerifiedUpdate(manifest, target, hash, bytes, signature);
         }
         finally { if (Directory.Exists(staging)) Directory.Delete(staging, true); }

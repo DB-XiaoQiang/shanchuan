@@ -8,6 +8,9 @@ public interface IUpdateRelay
     Task RelayAsync(VerifiedUpdate candidate, AppSettings settings, string password, CancellationToken token);
     Task<VerifiedUpdate?> ReceiveAsync(UpdateCache cache, UpdateManifestVerifier verifier, string minimumVersion,
         AppSettings settings, string password, CancellationToken token);
+    Task<VerifiedUpdate?> ReceiveAsync(UpdateCache cache, UpdateManifestVerifier verifier, string minimumVersion,
+        AppSettings settings, string password, CancellationToken token, IProgress<UpdateDownloadProgress>? progress) =>
+        ReceiveAsync(cache, verifier, minimumVersion, settings, password, token);
 }
 
 /// <summary>Dedicated update namespace: internal peers never delete shared publisher files.</summary>
@@ -33,8 +36,12 @@ public sealed class FtpUpdateTransport(Func<bool>? isBusy = null, SemaphoreSlim?
         await UploadAsync(Path.Combine(candidate.CacheDirectory, UpdateManifestVerifier.SignatureName), batch + "/" + UpdateManifestVerifier.SignatureName, settings, password, token);
     }
 
+    public Task<VerifiedUpdate?> ReceiveAsync(UpdateCache cache, UpdateManifestVerifier verifier, string minimumVersion,
+        AppSettings settings, string password, CancellationToken token) =>
+        ReceiveAsync(cache, verifier, minimumVersion, settings, password, token, null);
+
     public async Task<VerifiedUpdate?> ReceiveAsync(UpdateCache cache, UpdateManifestVerifier verifier, string minimumVersion,
-        AppSettings settings, string password, CancellationToken token)
+        AppSettings settings, string password, CancellationToken token, IProgress<UpdateDownloadProgress>? progress)
     {
         NetworkPolicy.RequireReceive(settings);
         Validate(settings, password);
@@ -58,8 +65,8 @@ public sealed class FtpUpdateTransport(Func<bool>? isBusy = null, SemaphoreSlim?
                     var signature = await DownloadBytesAsync(directory + "/" + UpdateManifestVerifier.SignatureName, 256, settings, password, token);
                     var manifest = verifier.Verify(manifestBytes, signature);
                     if (manifest.Version != version) throw L.WithDescription(new InvalidDataException(L.T("更新目录版本与签名清单不一致。")), L.M("更新目录版本与签名清单不一致。"));
-                    var verified = await cache.ImportAsync(manifestBytes, signature, (asset, destination, ct) =>
-                        DownloadFileAsync(directory + "/" + asset.Name, destination, asset.Size, settings, password, ct), token);
+                    var verified = await cache.ImportAsync(manifestBytes, signature, (asset, destination, bytes, ct) =>
+                        DownloadFileAsync(directory + "/" + asset.Name, destination, asset.Size, settings, password, ct, bytes), progress, token);
                     return verified;
                 }
                 catch (Exception error) when (error is IOException or System.Security.Cryptography.CryptographicException or System.Text.Json.JsonException or FtpException or KeyNotFoundException or InvalidOperationException)
@@ -101,7 +108,7 @@ public sealed class FtpUpdateTransport(Func<bool>? isBusy = null, SemaphoreSlim?
         finally { _gate.Release(); }
     }
 
-    private async Task DownloadFileAsync(string remote, string destination, long maximum, AppSettings settings, string password, CancellationToken token)
+    private async Task DownloadFileAsync(string remote, string destination, long maximum, AppSettings settings, string password, CancellationToken token, IProgress<long>? progress = null)
     {
         await EnterAsync(token);
         try
@@ -110,7 +117,7 @@ public sealed class FtpUpdateTransport(Func<bool>? isBusy = null, SemaphoreSlim?
             await client.Connect(token);
             await using (var input = await client.OpenRead(remote, FtpDataType.Binary, 0, -1, token))
             await using (var output = new FileStream(destination, FileMode.CreateNew, FileAccess.Write, FileShare.None, 128 * 1024, true))
-                await GitHubUpdateSource.CopyBoundedAsync(input, output, maximum, token);
+                await GitHubUpdateSource.CopyBoundedAsync(input, output, maximum, token, progress);
             // Raw FTP data streams require consuming the transfer-complete reply.
             var reply = await client.GetReply(token);
             if (!reply.Success) throw L.WithDescription(new IOException(L.T("FTP 更新下载未完成。")), L.M("FTP 更新下载未完成。"));

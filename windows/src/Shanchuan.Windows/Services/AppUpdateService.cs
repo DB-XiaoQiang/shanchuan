@@ -62,21 +62,29 @@ public sealed class AppUpdateService : ObservableObject, IDisposable
     public string CurrentVersion => "v" + InstalledVersion;
     public string CurrentVersionText => L.F($"当前版本 {CurrentVersion}");
     public string? CandidateVersion => _snapshot.CandidateVersion;
-    public string Status => _installationStatus?.ToString() ?? (_manualChecking ? L.T("正在检查更新…") :
+    public string Status => _installationStatus?.ToString() ?? (_snapshot.Download is { } download && _coordinator.IsBusy
+        ? download.IsVerified ? L.T("下载及验证完成，可立即更新") : download.IsVerifying ? L.T("正在验证更新包…") : L.T("正在下载更新包…")
+        : _manualChecking ? L.T("正在检查更新…") :
         !_coordinator.IsBusy && (_coordinator.Snapshot.Status == L.T("检查中") || _coordinator.Snapshot.Status == L.T("下载中")) ? L.T("等待检查更新") : _coordinator.Snapshot.Status);
+    public double DownloadPercent => _snapshot.Download?.Percent ?? 0;
+    public string DownloadProgressText => _snapshot.Download?.Summary ?? "";
+    public Visibility DownloadProgressVisibility => _snapshot.Download is not null ? Visibility.Visible : Visibility.Collapsed;
+    public string CandidateVersionText => CandidateVersion is { Length: > 0 } version ? L.F($"新版本 v{version}") : "";
+    public string InstallHint => L.T("点击后将等待传输完成，安装此版本并重新启动。");
     public string LastCheckedText => _manualChecking ? L.T("正在手动检查更新…") :
         _lastManualCheckAt is { } checkedAt
             ? L.F($"手动检查完成 {checkedAt:yyyy-MM-dd HH:mm:ss}\n{_lastManualCheckResult}")
             : L.T("尚未手动检查");
-    public string CheckButtonText => _manualChecking ? L.T("正在检查…") : L.T("检查更新 / 重试");
+    public string CheckButtonText => _snapshot.Download is { IsVerified: false } && _coordinator.IsBusy
+        ? L.T("正在下载 / 验证…") : _manualChecking ? L.T("正在检查…") : L.T("检查更新 / 重试");
     public string DownloadPageUrl => "https://github.com/DB-XiaoQiang/shanchuan/releases";
     public RelayCommand OpenDownloadsCommand => _openDownloadsCommand ??= new RelayCommand(_ => OpenDownloads(), _ => !_disposed);
     private RelayCommand? _openDownloadsCommand;
     public string RelayStatus => _coordinator.Snapshot.RelayStatus;
     public string ReleaseNotes => _snapshot.ReleaseNotes;
     public bool CanCheck => !_disposed && !_ticking && !_requesting && !_installing && !_coordinator.IsBusy && _authorized is null;
-    public bool CanInstall => !_disposed && _snapshot.CanInstall && !_requesting && !_ticking && !_coordinator.IsBusy && !_installing && _authorized is null;
-    public string InstallButtonText => CandidateVersion is { Length: > 0 } version ? L.F($"更新至 v{version}") : L.T("更新");
+    public bool CanInstall => !_disposed && _snapshot.CanInstall && !_requesting && !_installing && _authorized is null;
+    public string InstallButtonText => L.T("更新并重启");
     public Visibility InstallButtonVisibility => _snapshot.CanInstall ? Visibility.Visible : Visibility.Collapsed;
 
     public void Start()
@@ -140,27 +148,24 @@ public sealed class AppUpdateService : ObservableObject, IDisposable
 
     public async Task RequestInstallAsync(Window owner)
     {
-        if (_installing || _requesting || _ticking || _authorized is not null || _disposed) return;
+        if (_installing || _requesting || !CanInstall || _authorized is not null || _disposed) return;
+        var displayedVersion = _snapshot.CandidateVersion;
         _requesting = true;
         NotifyState();
         try
         {
             var candidate = await Task.Run(_coordinator.GetCandidateForInstall, _lifetime.Token);
             if (candidate is null) { SetInstallationStatus(L.M("没有已验证的待安装更新")); return; }
+            if (candidate.Manifest.Version != displayedVersion)
+                throw L.WithDescription(new InvalidDataException(L.T("待安装版本已变化，请重新检查后再点击更新。")), L.M("待安装版本已变化，请重新检查后再点击更新。"));
             var manager = new UpdateManager();
             if (!manager.IsInstalled)
             {
                 MessageBox.Show(owner, L.M("请先使用正式 Release 中的 Setup 安装版安装闪传，再使用应用内更新。"), L.M("安装更新"));
                 return;
             }
-            var notes = candidate.Manifest.ReleaseNotes;
-            if (notes.Length > 6000) notes = notes[..6000] + "…";
-            var busy = _owner.HasBusinessTransfers || _coordinator.IsBusy;
-            var message = L.MF($"当前版本：v{InstalledVersion}\n目标版本：v{candidate.Manifest.Version}\n\n{notes}\n\n") +
-                (busy ? L.M("确认后等待传输完成，再安装并重新启动闪传。") : L.M("是否安装此版本并重新启动闪传？")) +
-                L.M("\n选择“稍后”则稍后更新，已下载的更新包会保留。");
-            if (!LocalizedMessageBox.ConfirmUpdate(owner, message, L.M("闪传更新"))) return;
-            // A candidate may have changed while the confirmation dialog was open.
+            // The version, release notes and restart effect are shown before
+            // the clearly labelled button. This click is the single consent.
             var fresh = await Task.Run(_coordinator.GetCandidateForInstall, _lifetime.Token);
             var authorization = new UpdateInstallAuthorization(candidate.Manifest.Version, candidate.ManifestHash);
             RequireAuthorizedCandidate(fresh, authorization);
@@ -378,7 +383,8 @@ public sealed class AppUpdateService : ObservableObject, IDisposable
         if (_disposed) return;
         if (!_dispatcher.CheckAccess()) { _dispatcher.BeginInvoke(new Action(NotifyState)); return; }
         foreach (var property in new[] { nameof(CurrentVersion), nameof(CurrentVersionText), nameof(CandidateVersion), nameof(Status), nameof(RelayStatus),
-            nameof(LastCheckedText), nameof(CheckButtonText),
+            nameof(LastCheckedText), nameof(CheckButtonText), nameof(DownloadPercent), nameof(DownloadProgressText),
+            nameof(DownloadProgressVisibility), nameof(CandidateVersionText), nameof(InstallHint),
             nameof(ReleaseNotes), nameof(CanCheck), nameof(CanInstall), nameof(InstallButtonText), nameof(InstallButtonVisibility) })
             OnPropertyChanged(property);
     }

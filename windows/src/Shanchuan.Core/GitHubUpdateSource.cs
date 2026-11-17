@@ -10,6 +10,8 @@ public interface IUpdateSource
 {
     Task<RemoteUpdateRelease?> GetLatestAsync(CancellationToken token);
     Task DownloadAssetAsync(string tag, UpdateAsset asset, string destination, CancellationToken token);
+    Task DownloadAssetAsync(string tag, UpdateAsset asset, string destination, CancellationToken token, IProgress<long>? progress) =>
+        DownloadAssetAsync(tag, asset, destination, token);
 }
 
 /// <summary>Only public stable releases from the owning repository are accepted.</summary>
@@ -42,7 +44,10 @@ public sealed class GitHubUpdateSource : IUpdateSource
         return new RemoteUpdateRelease(tag, manifest, signature);
     }
 
-    public async Task DownloadAssetAsync(string tag, UpdateAsset asset, string destination, CancellationToken token)
+    public Task DownloadAssetAsync(string tag, UpdateAsset asset, string destination, CancellationToken token) =>
+        DownloadAssetAsync(tag, asset, destination, token, null);
+
+    public async Task DownloadAssetAsync(string tag, UpdateAsset asset, string destination, CancellationToken token, IProgress<long>? progress)
     {
         using var request = Request(AssetUrl(tag, asset.Name));
         using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token);
@@ -51,7 +56,7 @@ public sealed class GitHubUpdateSource : IUpdateSource
             throw L.WithDescription(new InvalidDataException(L.T("GitHub 更新附件大小与清单不一致。")), L.M("GitHub 更新附件大小与清单不一致。"));
         await using var input = await response.Content.ReadAsStreamAsync(token);
         await using var output = new FileStream(destination, FileMode.CreateNew, FileAccess.Write, FileShare.None, 128 * 1024, true);
-        await CopyBoundedAsync(input, output, asset.Size, token);
+        await CopyBoundedAsync(input, output, asset.Size, token, progress);
         if (output.Length != asset.Size) throw L.WithDescription(new InvalidDataException(L.T("GitHub 更新附件未完整下载。")), L.M("GitHub 更新附件未完整下载。"));
     }
 
@@ -88,16 +93,18 @@ public sealed class GitHubUpdateSource : IUpdateSource
         return output.ToArray();
     }
 
-    internal static async Task CopyBoundedAsync(Stream input, Stream output, long maximum, CancellationToken token)
+    internal static async Task CopyBoundedAsync(Stream input, Stream output, long maximum, CancellationToken token, IProgress<long>? progress = null)
     {
         var buffer = new byte[128 * 1024];
         long total = 0;
         int count;
+        progress?.Report(0);
         while ((count = await input.ReadAsync(buffer, token)) > 0)
         {
             total += count;
             if (total > maximum) throw L.WithDescription(new InvalidDataException(L.T("更新下载超过清单允许的大小。")), L.M("更新下载超过清单允许的大小。"));
             await output.WriteAsync(buffer.AsMemory(0, count), token);
+            progress?.Report(total);
         }
     }
 }

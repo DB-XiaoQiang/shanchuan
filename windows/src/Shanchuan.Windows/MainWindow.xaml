@@ -27,7 +27,20 @@
                             <TextBlock Text="{Binding Updates.CurrentVersionText}" Foreground="#667085" FontSize="12" />
                             <TextBlock AutomationProperties.AutomationId="UpdateStatus" Text="{Binding Updates.Status}" TextWrapping="Wrap" Foreground="#475467" FontSize="12" Margin="0,5,0,0" />
                             <TextBlock Text="{Binding Updates.RelayStatus}" TextWrapping="Wrap" Foreground="#667085" FontSize="11" Margin="0,4,0,0" />
-                            <Button Content="{Binding Updates.InstallButtonText}" Click="InstallUpdate" Visibility="{Binding Updates.InstallButtonVisibility}"
+                            <StackPanel Visibility="{Binding Updates.DownloadProgressVisibility}" Margin="0,8,0,0">
+                                <ProgressBar AutomationProperties.AutomationId="UpdateDownloadProgress" Minimum="0" Maximum="100" Height="5" Value="{Binding Updates.DownloadPercent}" />
+                                <TextBlock AutomationProperties.AutomationId="UpdateDownloadBytes" Text="{Binding Updates.DownloadProgressText}" TextWrapping="Wrap" FontSize="11" Foreground="#475467" Margin="0,4,0,0" />
+                            </StackPanel>
+                            <StackPanel Visibility="{Binding Updates.InstallButtonVisibility}" Margin="0,7,0,0">
+                                <TextBlock AutomationProperties.AutomationId="UpdateTargetVersion" Text="{Binding Updates.CandidateVersionText}" FontSize="12" FontWeight="SemiBold" />
+                                <Expander AutomationProperties.AutomationId="UpdateReleaseNotes" Header="{loc:Tr Key='更新说明'}" FontSize="11" Margin="0,4,0,0">
+                                    <ScrollViewer MaxHeight="160" VerticalScrollBarVisibility="Auto">
+                                        <TextBlock Text="{Binding Updates.ReleaseNotes}" TextWrapping="Wrap" />
+                                    </ScrollViewer>
+                                </Expander>
+                                <TextBlock AutomationProperties.AutomationId="UpdateInstallHint" Text="{Binding Updates.InstallHint}" TextWrapping="Wrap" FontSize="11" Foreground="#667085" Margin="0,4,0,0" />
+                            </StackPanel>
+                            <Button AutomationProperties.AutomationId="InstallUpdateNow" Content="{Binding Updates.InstallButtonText}" Click="InstallUpdate" Visibility="{Binding Updates.InstallButtonVisibility}"
                                     IsEnabled="{Binding Updates.CanInstall}" Background="#DBEAFE" Foreground="#1D4ED8" Margin="0,8,0,0" />
                             <Button AutomationProperties.AutomationId="CheckUpdates" Content="{Binding Updates.CheckButtonText}" Click="CheckForUpdates" IsEnabled="{Binding Updates.CanCheck}" Margin="0,6,0,0" />
                             <TextBlock AutomationProperties.AutomationId="UpdateLastChecked" Text="{Binding Updates.LastCheckedText}" TextWrapping="Wrap" FontSize="11" Foreground="#667085" Margin="0,5,0,0" />
