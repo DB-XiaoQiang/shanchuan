@@ -30,6 +30,27 @@ class ReleasePolicyTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             policy.release_policy('', True, True)
 
+    def test_unnotarized_requires_explicit_verified_preparation_and_both_keys(self):
+        for verified in (False, True):
+            for manifest in (False, True):
+                for sparkle in (False, True):
+                    ready = verified and manifest and sparkle
+                    result = policy.release_policy('unnotarized', False, manifest,
+                        unnotarized_verified=verified, sparkle_key_present=sparkle)
+                    self.assertEqual(ready, result['generate_manifest'])
+                    self.assertEqual(not ready, result['draft'])
+                    self.assertFalse(result['prerelease'])
+                    self.assertEqual([] if ready else ['--draft'], result['arguments'])
+
+    def test_new_gate_cannot_change_prerelease_or_bypass_notarized_stable(self):
+        result = policy.release_policy('prerelease', True, True,
+            unnotarized_verified=True, sparkle_key_present=True)
+        self.assertTrue(result['prerelease'])
+        self.assertFalse(result['generate_manifest'])
+        self.assertTrue(policy.release_policy('stable', False, True,
+            unnotarized_verified=True, sparkle_key_present=True)['draft'])
+        self.assertTrue(policy.release_policy('unnotarized', True, True)['draft'])
+
 
 if __name__ == '__main__':
     unittest.main()

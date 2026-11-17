@@ -4,7 +4,8 @@ cd "${0:A:h:h}"
 SIGNING_IDENTITY="${COPYTOOL_SIGNING_IDENTITY:-}"
 UNSIGNED_CI="${SHANCHUAN_UNSIGNED_CI:-0}"
 VERSION="$(cat VERSION)"
-BUILD_NUMBER="${SHANCHUAN_BUILD_NUMBER:-1}"
+# 同一源码提交的 CI、本机与版本发布必须使用相同构建号。
+BUILD_NUMBER="$(python3 scripts/build-number.py)"
 SHANCHUAN_UPDATE_FEED="${SHANCHUAN_UPDATE_FEED:-https://github.com/DB-XiaoQiang/shanchuan/releases/latest/download/appcast.xml}"
 SPARKLE_PUBLIC_KEY="${SPARKLE_PUBLIC_KEY:-$(cat Resources/sparkle-public-key.txt)}"
 if [[ ! "$VERSION" =~ '^[0-9]+\.[0-9]+\.[0-9]+$' || "$BUILD_NUMBER" != <-> ]]; then
