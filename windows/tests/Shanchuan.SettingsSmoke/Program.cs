@@ -492,6 +492,9 @@ internal static class Program
                 Check(install.IsVisible && install.IsEnabled && install.Content as string == (selected == "en" ? "Update and restart" : "更新并重启"),
                     "one-click-update-label-" + selected);
                 Check(Find<TextBlock>(window, "UpdateTargetVersion").Text.Contains("9.8.7"), "one-click-target-before-consent-" + selected);
+                var recheck = Find<Button>(window, "RecheckUpdates");
+                Check(recheck.IsVisible && recheck.IsEnabled && recheck.Content as string == (selected == "en" ? "Check again" : "重新检查更新"),
+                    "ready-retains-manual-recheck-in-details-" + selected);
                 var notes = Find<Expander>(window, "UpdateReleaseNotes"); notes.IsExpanded = true; Pump();
                 Check(notes.Header as string == (selected == "en" ? "Release notes" : "更新说明"), "one-click-notes-header-" + selected);
                 Check(updates.ReleaseNotes.Contains("Synthetic release notes"), "one-click-notes-before-consent-" + selected);

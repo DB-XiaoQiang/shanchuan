@@ -48,6 +48,9 @@
                                     <TextBlock AutomationProperties.AutomationId="UpdateStatus" Text="{Binding Updates.Status}" TextWrapping="Wrap" Foreground="#475467" FontSize="12" Margin="0,5,0,0" />
                                     <TextBlock Text="{Binding Updates.RelayStatus}" TextWrapping="Wrap" Foreground="#667085" FontSize="11" Margin="0,4,0,0" />
                                     <TextBlock AutomationProperties.AutomationId="UpdateLastChecked" Text="{Binding Updates.LastCheckedText}" TextWrapping="Wrap" FontSize="11" Foreground="#667085" Margin="0,5,0,0" />
+                                    <Button AutomationProperties.AutomationId="RecheckUpdates" Content="{loc:Tr Key='重新检查更新'}" Click="CheckForUpdates"
+                                            Visibility="{Binding Updates.InstallButtonVisibility}" IsEnabled="{Binding Updates.CanCheck}"
+                                            FontSize="11" Background="Transparent" BorderThickness="0" HorizontalAlignment="Left" Padding="0,4" />
                                 </StackPanel>
                                 </ScrollViewer>
                             </Expander>

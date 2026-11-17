@@ -112,6 +112,10 @@ struct UpdateStatusPanel: View {
                     Text(updates.status).textSelection(.enabled)
                     if let checked = updates.lastCheckCompletedAt { Text(L10n.text("最近检查：") + L10n.date(checked)) }
                     if !updates.relayStatus.isEmpty { Text(updates.relayStatus) }
+                    if updates.canInstall {
+                        Button(L10n.text("重新检查更新")) { updates.check() }
+                            .buttonStyle(.borderless).disabled(!enabled || !updates.canCheck)
+                    }
                 }.font(.caption2).foregroundStyle(.secondary).padding(.top, 4)
                 }.frame(maxHeight: 140)
             }.font(.caption2)
